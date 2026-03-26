@@ -18,9 +18,12 @@ package com.hazelcast.internal.diagnostics;
 
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.logging.Logger;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -36,6 +39,7 @@ public class DiagnosticsLogConverter {
             "^(\\d{2}-\\d{2}-\\d{4} \\d{2}:\\d{2}:\\d{2}) (?:(\\d+) )?(.+)\\[\\]?$";
     private static final Pattern TOP_LEVEL_PATTERN = Pattern.compile(TOP_LEVEL_PATTERN_STR);
     private static final String INDENT = "                          ";
+    private static final int INDENT_BASE = 26;
     private static final int DEPTH_INDENT_SIZE = 8;
 
     public static class DiagnosticEntry {
@@ -205,12 +209,17 @@ public class DiagnosticsLogConverter {
     }
 
     /**
-     * If more than one closing bracket needs to be returned, stores the remainder in the
-     * line array so the caller can process it, then returns lineIndex.
+     * When multiple closing brackets appear on the same line, stores the remaining brackets in
+     * the line array at {@code lineIndex} so the caller's parse loop re-processes them, and
+     * returns {@code lineIndex - 1}.  The caller increments its index before the next iteration,
+     * so returning {@code lineIndex - 1} causes it to land on {@code lineIndex} and re-visit
+     * the mutated line.  For a single closing bracket no mutation is needed; {@code lineIndex}
+     * is returned unchanged (the call is already a {@code return} statement in the caller).
      */
     private static int returnWithRemainingBrackets(String[] lines, int lineIndex, int closingBrackets) {
         if (closingBrackets > 1) {
             lines[lineIndex] = repeatBrackets(closingBrackets - 1);
+            return lineIndex - 1;
         }
         return lineIndex;
     }
@@ -369,5 +378,161 @@ public class DiagnosticsLogConverter {
                 .replace("\n", "\\n")
                 .replace("\r", "\\r")
                 .replace("\t", "\\t");
+    }
+
+    /**
+     * Parses a JSON string produced by {@link #toJson(DiagnosticEntry)} back into a
+     * {@link DiagnosticEntry}.  Integer JSON numbers are always deserialized as {@code Long}
+     * so that subsequent {@link #toStandard} output is consistent with the original STANDARD
+     * format.
+     *
+     * @return the parsed entry, or {@code null} if parsing fails
+     */
+    public DiagnosticEntry parseJson(String json) {
+        if (json == null || json.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            JsonNode root = new ObjectMapper().readTree(json);
+            DiagnosticEntry entry = new DiagnosticEntry();
+            entry.time = root.get("time").asText();
+            JsonNode epochNode = root.get("epoch");
+            if (epochNode != null && !epochNode.isNull()) {
+                entry.epoch = epochNode.longValue();
+            }
+            entry.name = root.get("name").asText();
+            entry.content = jsonNodeToMap(root.get("content"));
+            return entry;
+        } catch (Exception e) {
+            LOGGER.severe("Failed to parse JSON diagnostics entry: " + json, e);
+            return null;
+        }
+    }
+
+    private Map<String, Object> jsonNodeToMap(JsonNode node) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        for (Map.Entry<String, JsonNode> field : node.properties()) {
+            map.put(field.getKey(), jsonNodeToValue(field.getValue()));
+        }
+        return map;
+    }
+
+    private Object jsonNodeToValue(JsonNode node) {
+        if (node.isNull()) {
+            return null;
+        }
+        if (node.isBoolean()) {
+            return node.booleanValue();
+        }
+        if (node.isIntegralNumber()) {
+            return node.longValue();
+        }
+        if (node.isFloatingPointNumber()) {
+            return node.doubleValue();
+        }
+        if (node.isTextual()) {
+            return node.textValue();
+        }
+        if (node.isObject()) {
+            return jsonNodeToMap(node);
+        }
+        if (node.isArray()) {
+            List<Object> list = new ArrayList<>();
+            node.forEach(item -> list.add(jsonNodeToValue(item)));
+            return list;
+        }
+        return node.asText();
+    }
+
+    /**
+     * Reconstructs a STANDARD-format diagnostics string from a {@link DiagnosticEntry}.
+     * This is the reverse of {@link #parseStandard(String)} and allows round-trip validation.
+     * <p>
+     * {@code Long} values are written with comma grouping (matching
+     * {@link DiagnosticsLogWriterImpl#writeLong}), {@code Double} values use
+     * {@link Double#toString}, and {@code String} values are re-escaped using the same
+     * rules as {@link DiagnosticsLogWriterImpl}.
+     */
+    public String toStandard(DiagnosticEntry entry) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(entry.time).append(' ');
+        if (entry.epoch != null) {
+            sb.append(entry.epoch).append(' ');
+        }
+        sb.append(escapeStandard(entry.name)).append('[');
+        appendStandardContent(sb, entry.content, 0);
+        sb.append(']').append(System.lineSeparator());
+        return sb.toString();
+    }
+
+    private void appendStandardContent(StringBuilder sb, Map<String, Object> content, int depth) {
+        for (Map.Entry<String, Object> e : content.entrySet()) {
+            String key = e.getKey();
+            Object value = e.getValue();
+            if ("entries".equals(key) && value instanceof List) {
+                for (Object item : (List<Object>) value) {
+                    appendStandardIndent(sb, depth);
+                    sb.append(escapeStandard(String.valueOf(item)));
+                }
+            } else if (value instanceof Map) {
+                appendStandardIndent(sb, depth);
+                sb.append(escapeStandard(key)).append('[');
+                appendStandardContent(sb, (Map<String, Object>) value, depth + 1);
+                sb.append(']');
+            } else if (value instanceof List) {
+                // Duplicate key promoted to a list — write each item as a separate line.
+                for (Object item : (List<Object>) value) {
+                    appendStandardIndent(sb, depth);
+                    sb.append(escapeStandard(key)).append('=');
+                    appendStandardValue(sb, item);
+                }
+            } else {
+                appendStandardIndent(sb, depth);
+                sb.append(escapeStandard(key)).append('=');
+                appendStandardValue(sb, value);
+            }
+        }
+    }
+
+    private static void appendStandardIndent(StringBuilder sb, int depth) {
+        sb.append(System.lineSeparator());
+        int spaces = INDENT_BASE + DEPTH_INDENT_SIZE * depth;
+        for (int i = 0; i < spaces; i++) {
+            sb.append(' ');
+        }
+    }
+
+    private void appendStandardValue(StringBuilder sb, Object value) {
+        if (value == null) {
+            sb.append("null");
+        } else if (value instanceof Long) {
+            sb.append(String.format(Locale.ROOT, "%,d", (Long) value));
+        } else if (value instanceof Double) {
+            sb.append(value);
+        } else if (value instanceof Boolean) {
+            sb.append(value);
+        } else {
+            sb.append(escapeStandard(String.valueOf(value)));
+        }
+    }
+
+    private String escapeStandard(String s) {
+        if (s == null) {
+            return "null";
+        }
+        StringBuilder sb = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '\\': sb.append("\\\\"); break;
+                case '[':  sb.append("\\[");  break;
+                case ']':  sb.append("\\]");  break;
+                case '=':  sb.append("\\=");  break;
+                case '\n': sb.append("\\n");  break;
+                case '\r': sb.append("\\r");  break;
+                default:   sb.append(c);      break;
+            }
+        }
+        return sb.toString();
     }
 }
