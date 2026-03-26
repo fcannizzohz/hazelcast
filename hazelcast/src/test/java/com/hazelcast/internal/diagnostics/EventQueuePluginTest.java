@@ -65,6 +65,8 @@ import javax.cache.event.CacheEntryEvent;
 import javax.cache.event.CacheEntryListenerException;
 import javax.cache.event.CacheEntryRemovedListener;
 import javax.cache.spi.CachingProvider;
+import java.io.CharArrayWriter;
+import java.io.PrintWriter;
 import java.io.Serializable;
 import java.util.HashSet;
 import java.util.List;
@@ -118,6 +120,42 @@ public class EventQueuePluginTest extends AbstractDiagnosticsPluginTest {
         itemCounter = plugin.getOccurrenceMap();
 
         warmUpPartitions(hz);
+    }
+
+    @Test
+    public void testMap_jsonFormat_producesStructuredSampleEntries() {
+        final IMap<Integer, Integer> map = hz.getMap(MAP_NAME);
+        final CountDownLatch jsonLatch = new CountDownLatch(1);
+        map.addLocalEntryListener(
+                (EntryAddedListener<Integer, Integer>) event -> assertOpenEventually(jsonLatch));
+
+        spawn((Runnable) () -> {
+            Random random = new Random();
+            for (int i = 0; i < EVENT_COUNTER; i++) {
+                map.putAsync(random.nextInt(Integer.MAX_VALUE), 23);
+            }
+        });
+
+        CharArrayWriter jsonOut = new CharArrayWriter();
+        DiagnosticsLogWriterJsonImpl jsonWriter = new DiagnosticsLogWriterJsonImpl(false, null);
+
+        try {
+            assertTrueEventually(() -> {
+                jsonOut.reset();
+                jsonWriter.init(new PrintWriter(jsonOut));
+                plugin.run(jsonWriter);
+
+                String output = jsonOut.toString();
+                assertTrue("eventType key expected in JSON samples",
+                        output.contains("\"eventType\":"));
+                assertTrue("sampleCount key expected in JSON samples",
+                        output.contains("\"sampleCount\":"));
+                assertTrue("percentage key expected in JSON samples",
+                        output.contains("\"percentage\":"));
+            });
+        } finally {
+            jsonLatch.countDown();
+        }
     }
 
     @Test

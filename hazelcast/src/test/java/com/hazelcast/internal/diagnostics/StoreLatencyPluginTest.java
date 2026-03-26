@@ -27,12 +27,15 @@ import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 
+import java.io.CharArrayWriter;
+import java.io.PrintWriter;
 import java.util.Properties;
 
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
 
 @RunWith(HazelcastParallelClassRunner.class)
 @Category(QuickTest.class)
@@ -122,5 +125,70 @@ public class StoreLatencyPluginTest extends AbstractDiagnosticsPluginTest {
         plugin.run(logWriter);
 
         assertContains("4..7us=1");
+    }
+
+    @Test
+    public void render_jsonFormat_emitsStructuredOutput() {
+        LatencyProbeImpl probe = (LatencyProbeImpl) plugin.newProbe("MapService", "employees", "load");
+        probe.recordValue(MICROSECONDS.toNanos(100));
+        probe.recordValue(MICROSECONDS.toNanos(200));
+
+        CharArrayWriter out = new CharArrayWriter();
+        DiagnosticsLogWriterJsonImpl jsonWriter = new DiagnosticsLogWriterJsonImpl(false, null);
+        jsonWriter.init(new PrintWriter(out));
+
+        plugin.run(jsonWriter);
+
+        String output = out.toString();
+        assertTrue("Expected service name section", output.contains("\"MapService\""));
+        assertTrue("Expected data structure name section", output.contains("\"employees\""));
+        assertTrue("Expected method name section", output.contains("\"load\""));
+        assertTrue("Expected count key", output.contains("\"count\":2"));
+        assertTrue("Expected latency-distribution section", output.contains("\"latency-distribution\""));
+    }
+
+    @Test
+    public void render_jsonFormat_allStatsFieldsPresent() {
+        LatencyProbeImpl probe = (LatencyProbeImpl) plugin.newProbe("Svc", "ds", "get");
+        probe.recordValue(MICROSECONDS.toNanos(100));
+        probe.recordValue(MICROSECONDS.toNanos(300));
+
+        CharArrayWriter out = new CharArrayWriter();
+        DiagnosticsLogWriterJsonImpl jsonWriter = new DiagnosticsLogWriterJsonImpl(false, null);
+        jsonWriter.init(new PrintWriter(out));
+
+        plugin.run(jsonWriter);
+
+        String output = out.toString();
+        assertTrue("Expected count", output.contains("\"count\":2"));
+        assertTrue("Expected totalTime(us)", output.contains("\"totalTime(us)\""));
+        assertTrue("Expected avg(us)", output.contains("\"avg(us)\""));
+        assertTrue("Expected max(us)", output.contains("\"max(us)\""));
+    }
+
+    @Test
+    public void render_zeroCount_probeNotEmitted() {
+        // probe registered but no values recorded: the service/instance sections are written
+        // but no latency stats (count/distribution) should appear
+        plugin.newProbe("Svc", "ds", "get");
+
+        plugin.run(logWriter);
+
+        assertNotContains("count=");
+        assertNotContains("latency-distribution");
+    }
+
+    @Test
+    public void render_multipleProbesInSameService_allEmitted() {
+        LatencyProbeImpl load = (LatencyProbeImpl) plugin.newProbe("MapService", "employees", "load");
+        LatencyProbeImpl store = (LatencyProbeImpl) plugin.newProbe("MapService", "employees", "store");
+        load.recordValue(MICROSECONDS.toNanos(50));
+        store.recordValue(MICROSECONDS.toNanos(80));
+
+        plugin.run(logWriter);
+
+        assertContains("load");
+        assertContains("store");
+        assertContains("count=1");
     }
 }

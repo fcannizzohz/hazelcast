@@ -35,6 +35,9 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
@@ -250,6 +253,32 @@ public class DiagnosticsTest extends HazelcastTestSupport {
 
         assertEquals(3, ((DiagnosticsLogFile) log).getMaxRollingFileCount());
         assertEquals(1024 * 1024, ((DiagnosticsLogFile) log).getMaxRollingFileSizeBytes());
+    }
+
+    @Test
+    public void test_DiagnosticsJsonOutput() throws Exception {
+        Config config = new Config();
+        config.setProperty(Diagnostics.ENABLED.getName(), "true");
+        config.setProperty(Diagnostics.LOG_FORMAT.getName(), "JSON");
+
+        Diagnostics diagnostics = newDiagnostics(config);
+        diagnostics.start();
+
+        DiagnosticsPlugin plugin = mock(DiagnosticsPlugin.class);
+        when(plugin.getPeriodMillis()).thenReturn(100L);
+        doAnswer(invocation -> {
+            DiagnosticsLogWriter writer = (DiagnosticsLogWriter) invocation.getArguments()[0];
+            writer.startSection("MySection");
+            writer.writeKeyValueEntry("key", "value");
+            writer.endSection();
+            return null;
+        }).when(plugin).run(any(DiagnosticsLogWriter.class));
+
+        diagnostics.register(plugin);
+
+        assertTrueEventually(() -> verify(plugin, atLeastOnce()).run(any(DiagnosticsLogWriter.class)));
+
+        diagnostics.shutdown();
     }
 
     private Diagnostics newDiagnostics(Config config) throws Exception {

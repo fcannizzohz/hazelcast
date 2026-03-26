@@ -18,6 +18,7 @@ package com.hazelcast.internal.diagnostics;
 
 import com.hazelcast.config.Config;
 import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.internal.util.ItemCounter;
 import com.hazelcast.map.EntryProcessor;
 import com.hazelcast.map.impl.operation.EntryOperation;
 import com.hazelcast.spi.impl.NodeEngineImpl;
@@ -28,10 +29,14 @@ import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 
+import java.io.CharArrayWriter;
+import java.io.PrintWriter;
+import java.lang.reflect.Field;
 import java.util.Map;
 
 import static com.hazelcast.test.Accessors.getNodeEngineImpl;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 @RunWith(HazelcastSerialClassRunner.class)
 @Category(QuickTest.class)
@@ -70,6 +75,28 @@ public class InvocationPluginTest extends AbstractDiagnosticsPluginTest {
 
             assertContains(EntryOperation.class.getName());
         });
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testHistory_jsonFormat_renderOccurrencesProducesStructuredEntries() throws Exception {
+        // Populate occurrences directly to avoid needing a slow pending invocation
+        Field occurrencesField = InvocationSamplePlugin.class.getDeclaredField("occurrences");
+        occurrencesField.setAccessible(true);
+        ItemCounter<String> occurrences = (ItemCounter<String>) occurrencesField.get(plugin);
+        occurrences.add("com.hazelcast.map.impl.operation.GetOperation", 3);
+        occurrences.add("com.hazelcast.map.impl.operation.PutOperation", 5);
+
+        CharArrayWriter jsonOut = new CharArrayWriter();
+        DiagnosticsLogWriterJsonImpl jsonWriter = new DiagnosticsLogWriterJsonImpl(false, null);
+        jsonWriter.init(new PrintWriter(jsonOut));
+        plugin.run(jsonWriter);
+
+        String json = jsonOut.toString();
+        assertTrue("operation key expected in JSON History section",
+                json.contains("\"operation\":\"com.hazelcast.map.impl.operation.GetOperation\""));
+        assertTrue("samples key expected in JSON History section",
+                json.contains("\"samples\":3") || json.contains("\"samples\":5"));
     }
 
     static class SlowEntryProcessor implements EntryProcessor {

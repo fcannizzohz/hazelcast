@@ -182,7 +182,11 @@ public class EventQueuePlugin extends DiagnosticsPlugin {
             }
 
             double percentage = (1d * value) / sampleCount;
-            writer.writeEntry(key + " sampleCount=" + value + " " + defaultFormat.format(percentage));
+            if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+                writer.writeStructuredEntry("eventType", key, "sampleCount", value, "percentage", percentage);
+            } else {
+                writer.writeEntry(key + " sampleCount=" + value + " " + defaultFormat.format(percentage));
+            }
         }
         occurrenceMap.reset();
 

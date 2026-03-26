@@ -98,22 +98,29 @@ public class OperationProfilerPlugin extends DiagnosticsPlugin {
             if (distribution.count() == 0) {
                 continue;
             }
-
             writer.startSection(entry.getKey().getName());
-            writer.writeKeyValueEntry("count", distribution.count());
-            writer.writeKeyValueEntry("totalTime(us)", distribution.totalMicros());
-            writer.writeKeyValueEntry("avg(us)", distribution.avgMicros());
-            writer.writeKeyValueEntry("max(us)", distribution.maxMicros());
-
-            writer.startSection("latency-distribution");
-            for (int bucket = 0; bucket < distribution.bucketCount(); bucket++) {
-                long value = distribution.bucket(bucket);
-                if (value > 0) {
-                    writer.writeKeyValueEntry(LatencyDistribution.LATENCY_KEYS[bucket], value);
-                }
-            }
-            writer.endSection();
+            writeLatencyStats(writer, distribution);
             writer.endSection();
         }
+    }
+
+    /**
+     * Writes the common latency statistics (count, totalTime, avg, max) and
+     * the {@code latency-distribution} sub-section for the given distribution.
+     * The caller is responsible for opening and closing the enclosing section.
+     */
+    static void writeLatencyStats(DiagnosticsLogWriter writer, LatencyDistribution distribution) {
+        writer.writeKeyValueEntry("count", distribution.count());
+        writer.writeKeyValueEntry("totalTime(us)", distribution.totalMicros());
+        writer.writeKeyValueEntry("avg(us)", distribution.avgMicros());
+        writer.writeKeyValueEntry("max(us)", distribution.maxMicros());
+        writer.startSection("latency-distribution");
+        for (int bucket = 0; bucket < distribution.bucketCount(); bucket++) {
+            long value = distribution.bucket(bucket);
+            if (value > 0) {
+                writer.writeKeyValueEntry(LatencyDistribution.LATENCY_KEYS[bucket], value);
+            }
+        }
+        writer.endSection();
     }
 }

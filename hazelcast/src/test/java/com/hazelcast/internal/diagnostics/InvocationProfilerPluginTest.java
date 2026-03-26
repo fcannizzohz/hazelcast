@@ -17,6 +17,9 @@
 package com.hazelcast.internal.diagnostics;
 
 import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.spi.impl.NodeEngineImpl;
+import com.hazelcast.spi.impl.operationservice.impl.InvocationRegistry;
+import com.hazelcast.spi.impl.operationservice.impl.OperationServiceImpl;
 import com.hazelcast.test.HazelcastParallelClassRunner;
 import com.hazelcast.test.annotation.QuickTest;
 import org.junit.Before;
@@ -34,41 +37,43 @@ import static org.junit.Assert.assertTrue;
 
 @RunWith(HazelcastParallelClassRunner.class)
 @Category(QuickTest.class)
-public class MemberHazelcastInstanceInfoPluginTest extends AbstractDiagnosticsPluginTest {
+public class InvocationProfilerPluginTest extends AbstractDiagnosticsPluginTest {
 
-    private MemberHazelcastInstanceInfoPlugin plugin;
+    private InvocationProfilerPlugin plugin;
 
     @Before
     public void setup() {
         HazelcastInstance hz = createHazelcastInstance();
-        plugin = new MemberHazelcastInstanceInfoPlugin(getNodeEngineImpl(hz));
+        NodeEngineImpl nodeEngine = getNodeEngineImpl(hz);
+        OperationServiceImpl operationService = nodeEngine.getOperationService();
+        InvocationRegistry invocationRegistry = operationService.getInvocationRegistry();
+        plugin = new InvocationProfilerPlugin(
+                nodeEngine.getLogger(InvocationProfilerPlugin.class),
+                invocationRegistry,
+                nodeEngine.getProperties());
         plugin.onStart();
     }
 
     @Test
     public void testGetPeriodMillis() {
-        assertEquals(SECONDS.toMillis(60), plugin.getPeriodMillis());
+        assertEquals(SECONDS.toMillis(5), plugin.getPeriodMillis());
     }
 
     @Test
-    public void testRun() {
+    public void testRun_standardFormat_emitsInvocationProfilerSection() {
         plugin.run(logWriter);
-
-        assertContains("HazelcastInstance[");
-        assertContains("isRunning=true");
-        assertContains("Members[");
+        assertContains("InvocationProfiler");
     }
 
     @Test
-    public void testRun_jsonFormat_memberAddressIsStructured() {
+    public void testRun_jsonFormat_emitsInvocationProfilerSection() {
         CharArrayWriter out = new CharArrayWriter();
         DiagnosticsLogWriterJsonImpl jsonWriter = new DiagnosticsLogWriterJsonImpl(false, null);
         jsonWriter.init(new PrintWriter(out));
 
         plugin.run(jsonWriter);
 
-        String output = out.toString();
-        assertTrue("Expected \"address\" key in JSON Members output", output.contains("\"address\":"));
-        assertTrue("Expected isRunning in JSON output", output.contains("\"isRunning\":true"));
+        assertTrue("Expected InvocationProfiler in JSON output",
+                out.toString().contains("\"InvocationProfiler\""));
     }
 }

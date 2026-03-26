@@ -84,27 +84,21 @@ public class DiagnosticsLogWriterImpl implements DiagnosticsLogWriter {
     @Override
     public void writeSectionKeyValue(String sectionName, long timeMillis, String key, long value) {
         startSection(sectionName, timeMillis);
-        write(key);
-        write('=');
-        write(value);
+        writeKeyValueEntry(key, value);
         endSection();
     }
 
     @Override
     public void writeSectionKeyValue(String sectionName, long timeMillis, String key, double value) {
         startSection(sectionName, timeMillis);
-        write(key);
-        write('=');
-        write(value);
+        writeKeyValueEntry(key, value);
         endSection();
     }
 
     @Override
     public void writeSectionKeyValue(String sectionName, long timeMillis, String key, String value) {
         startSection(sectionName, timeMillis);
-        write(key);
-        write('=');
-        write(value);
+        writeKeyValueEntry(key, value);
         endSection();
     }
 
@@ -113,6 +107,7 @@ public class DiagnosticsLogWriterImpl implements DiagnosticsLogWriter {
         startSection(sectionName, System.currentTimeMillis());
     }
 
+    @Override
     public void startSection(String name, long timeMillis) {
         if (sectionLevel == -1) {
             appendDateTime(timeMillis);
@@ -128,7 +123,7 @@ public class DiagnosticsLogWriterImpl implements DiagnosticsLogWriter {
             write(INDENTS[sectionLevel]);
         }
 
-        write(name);
+        writeEscaped(name);
         write('[');
         if (sectionLevel < INDENTS.length - 1) {
             sectionLevel++;
@@ -157,13 +152,13 @@ public class DiagnosticsLogWriterImpl implements DiagnosticsLogWriter {
         if (sectionLevel >= 0) {
             write(INDENTS[sectionLevel]);
         }
-        write(s);
+        writeEscaped(s);
     }
 
     @Override
     public void writeKeyValueEntry(String key, String value) {
         writeKeyValueHead(key);
-        write(value);
+        writeEscaped(value);
     }
 
     // we can't rely on NumberFormat, since it generates a ton of garbage
@@ -227,8 +222,13 @@ public class DiagnosticsLogWriterImpl implements DiagnosticsLogWriter {
         if (sectionLevel >= 0) {
             write(INDENTS[sectionLevel]);
         }
-        write(key);
+        writeEscaped(key);
         write('=');
+    }
+
+    @Override
+    public DiagnosticsLogFormat getFormat() {
+        return DiagnosticsLogFormat.STANDARD;
     }
 
     /**
@@ -242,6 +242,7 @@ public class DiagnosticsLogWriterImpl implements DiagnosticsLogWriter {
         sectionLevel = -1;
     }
 
+    @Override
     public void init(PrintWriter printWriter) {
         sectionLevel = -1;
         this.printWriter = printWriter;
@@ -250,6 +251,39 @@ public class DiagnosticsLogWriterImpl implements DiagnosticsLogWriter {
     protected DiagnosticsLogWriter write(char c) {
         printWriter.write(c);
         return this;
+    }
+
+    private void writeEscaped(String s) {
+        if (s == null) {
+            write("null");
+            return;
+        }
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '\\':
+                    write("\\\\");
+                    break;
+                case '[':
+                    write("\\[");
+                    break;
+                case ']':
+                    write("\\]");
+                    break;
+                case '=':
+                    write("\\=");
+                    break;
+                case '\n':
+                    write("\\n");
+                    break;
+                case '\r':
+                    write("\\r");
+                    break;
+                default:
+                    write(c);
+                    break;
+            }
+        }
     }
 
     protected DiagnosticsLogWriter write(int i) {

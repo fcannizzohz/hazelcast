@@ -32,7 +32,7 @@ public class SystemPropertiesPlugin extends DiagnosticsPlugin {
 
     static final String JVM_ARGS = "java.vm.args";
 
-    private final List keys = new ArrayList();
+    private final List<String> keys = new ArrayList<>();
     private String inputArgs;
 
     public SystemPropertiesPlugin(ILogger logger) {
@@ -75,7 +75,6 @@ public class SystemPropertiesPlugin extends DiagnosticsPlugin {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public void run(DiagnosticsLogWriter writer) {
         if (!isActive()) {
             return;
@@ -83,18 +82,17 @@ public class SystemPropertiesPlugin extends DiagnosticsPlugin {
         writer.startSection("SystemProperties");
 
         keys.clear();
-        keys.addAll(System.getProperties().keySet());
+        for (Object key : System.getProperties().keySet()) {
+            keys.add((String) key);
+        }
         keys.add(JVM_ARGS);
         sort(keys);
 
-        for (Object key : keys) {
-            String keyString = (String) key;
-            if (isIgnored(keyString)) {
+        for (String key : keys) {
+            if (isIgnored(key)) {
                 continue;
             }
-
-            String value = getProperty(keyString);
-            writer.writeKeyValueEntry(keyString, value);
+            writer.writeKeyValueEntry(key, getProperty(key));
         }
         writer.endSection();
     }
@@ -103,15 +101,10 @@ public class SystemPropertiesPlugin extends DiagnosticsPlugin {
         if (systemProperty.startsWith("java.awt")) {
             return true;
         }
-
-        if (systemProperty.startsWith("java")
-                || systemProperty.startsWith("hazelcast")
-                || systemProperty.startsWith("sun")
-                || systemProperty.startsWith("os")) {
-            return false;
-        }
-
-        return true;
+        return !systemProperty.startsWith("java")
+                && !systemProperty.startsWith("hazelcast")
+                && !systemProperty.startsWith("sun")
+                && !systemProperty.startsWith("os");
     }
 
     private String getProperty(String keyString) {

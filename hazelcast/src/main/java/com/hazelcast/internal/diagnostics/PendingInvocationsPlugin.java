@@ -122,8 +122,11 @@ public final class PendingInvocationsPlugin extends DiagnosticsPlugin {
             if (count < threshold) {
                 continue;
             }
-
-            writer.writeKeyValueEntry(op, count);
+            if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+                writer.writeStructuredEntry("operation", op, "count", count);
+            } else {
+                writer.writeKeyValueEntry(op, count);
+            }
         }
         writer.endSection();
     }

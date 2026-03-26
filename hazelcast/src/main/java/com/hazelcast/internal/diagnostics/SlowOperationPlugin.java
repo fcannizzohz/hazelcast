@@ -133,7 +133,11 @@ public class SlowOperationPlugin extends DiagnosticsPlugin {
         // this is quite inefficient due to object allocations; it would be cheaper to manually traverse
         String[] stackTraceLines = slowOperation.stackTrace.split(System.lineSeparator());
         for (String stackTraceLine : stackTraceLines) {
-            writer.writeEntry(stackTraceLine);
+            if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+                writer.writeStructuredEntry("line", stackTraceLine);
+            } else {
+                writer.writeEntry(stackTraceLine);
+            }
         }
         writer.endSection();
     }

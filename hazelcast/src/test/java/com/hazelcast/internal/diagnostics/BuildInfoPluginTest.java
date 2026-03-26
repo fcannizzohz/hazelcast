@@ -26,20 +26,27 @@ import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 
+import java.io.CharArrayWriter;
+import java.io.PrintWriter;
+
 import static com.hazelcast.test.Accessors.getNodeEngineImpl;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 @RunWith(HazelcastSerialClassRunner.class)
 @Category(QuickTest.class)
 public class BuildInfoPluginTest extends AbstractDiagnosticsPluginTest {
 
     private BuildInfoPlugin plugin;
+    private BuildInfo buildInfo;
 
     @Before
     public void setup() {
         HazelcastInstance hz = createHazelcastInstance();
         plugin = new BuildInfoPlugin(getNodeEngineImpl(hz).getLogger(BuildInfoPlugin.class));
         plugin.onStart();
+        buildInfo = BuildInfoProvider.getBuildInfo();
     }
 
     @Test
@@ -51,13 +58,36 @@ public class BuildInfoPluginTest extends AbstractDiagnosticsPluginTest {
     public void test() {
         plugin.run(logWriter);
 
-        BuildInfo buildInfo = BuildInfoProvider.getBuildInfo();
-
         assertContains("BuildNumber=" + buildInfo.getBuildNumber());
         assertContains("Build=" + buildInfo.getBuild());
         assertContains("Revision=" + buildInfo.getRevision());
         assertContains("Version=" + buildInfo.getVersion());
         assertContains("SerialVersion=" + buildInfo.getSerializationVersion());
         assertContains("Enterprise=" + buildInfo.isEnterprise());
+    }
+
+    @Test
+    public void test_jsonFormat_emitsKeyValuePairs() {
+        CharArrayWriter out = new CharArrayWriter();
+        DiagnosticsLogWriterJsonImpl jsonWriter = new DiagnosticsLogWriterJsonImpl(false, null);
+        jsonWriter.init(new PrintWriter(out));
+
+        plugin.run(jsonWriter);
+
+        String output = out.toString();
+        assertTrue("Expected BuildInfo section", output.contains("\"BuildInfo\""));
+        assertTrue("Expected Version key", output.contains("\"Version\":\"" + buildInfo.getVersion() + "\""));
+        assertTrue("Expected Enterprise key as boolean", output.contains("\"Enterprise\":" + buildInfo.isEnterprise()));
+        // BuildNumber must be a JSON numeric literal (no surrounding quotes)
+        assertTrue("Expected BuildNumber as numeric", output.contains("\"BuildNumber\":" + buildInfo.getBuildNumber()));
+        assertFalse("BuildNumber must not be a quoted string",
+                output.contains("\"BuildNumber\":\"" + buildInfo.getBuildNumber() + "\""));
+    }
+
+    @Test
+    public void test_standardFormat_buildNumberAsString() {
+        plugin.run(logWriter);
+        // In STANDARD format BuildNumber is written as a plain string (no comma grouping).
+        assertContains("BuildNumber=" + buildInfo.getBuildNumber());
     }
 }

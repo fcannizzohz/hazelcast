@@ -32,14 +32,15 @@ import java.nio.charset.StandardCharsets;
 final class DiagnosticsStdout implements DiagnosticsLog {
     private final Diagnostics diagnostics;
     private final ILogger logger;
-    private final DiagnosticsLogWriterImpl logWriter;
+    private final DiagnosticsLogWriter logWriter;
     private final PrintWriter printWriter;
     private boolean staticPluginsRendered;
 
     DiagnosticsStdout(Diagnostics diagnostics) {
         this.diagnostics = diagnostics;
         this.logger = diagnostics.logger;
-        this.logWriter = new DiagnosticsLogWriterImpl(diagnostics.isIncludeEpochTime(), diagnostics.logger);
+        this.logWriter = DiagnosticsLogWriterFactory.create(diagnostics.getDiagnosticsConfig().getLogFormat(),
+                diagnostics.isIncludeEpochTime(), diagnostics.logger);
         this.printWriter = newWriter();
         logWriter.init(printWriter);
         logger.info("Sending diagnostics logs to the stdout");

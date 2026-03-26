@@ -28,8 +28,13 @@ import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 
+import java.io.CharArrayWriter;
+import java.io.PrintWriter;
+
 import static com.hazelcast.test.Accessors.getNodeEngineImpl;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 @RunWith(HazelcastSerialClassRunner.class)
 @Category(QuickTest.class)
@@ -84,6 +89,26 @@ public class NetworkingImbalancePluginTest extends AbstractDiagnosticsPluginTest
             plugin.run(logWriter);
 
             assertNotContains("NaN");
+        });
+    }
+
+    @Test
+    public void testRun_jsonFormat_percentagesAreNumeric() {
+        spawn((Runnable) () -> hz.getMap("foo").put("key", "value"));
+
+        CharArrayWriter out = new CharArrayWriter();
+        DiagnosticsLogWriterJsonImpl jsonWriter = new DiagnosticsLogWriterJsonImpl(false, null);
+        jsonWriter.init(new PrintWriter(out));
+
+        assertTrueEventually(() -> {
+            out.reset();
+            jsonWriter.init(new PrintWriter(out));
+            plugin.run(jsonWriter);
+
+            String output = out.toString();
+            assertTrue("Expected frames-percentage key", output.contains("\"frames-percentage\":"));
+            // In JSON mode percentage values must not be strings (no quotes around the number)
+            assertFalse("Percentage must be numeric, not a quoted string", output.contains("\"frames-percentage\":\""));
         });
     }
 }

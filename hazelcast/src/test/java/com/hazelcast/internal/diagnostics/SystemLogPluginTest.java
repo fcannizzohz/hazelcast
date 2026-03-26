@@ -27,11 +27,15 @@ import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 
+import java.io.CharArrayWriter;
+import java.io.PrintWriter;
+
 import static com.hazelcast.internal.diagnostics.DiagnosticsPlugin.NOT_SCHEDULED_PERIOD_MS;
 import static com.hazelcast.internal.diagnostics.SystemLogPlugin.ENABLED;
 import static com.hazelcast.internal.diagnostics.SystemLogPlugin.LOG_PARTITIONS;
 import static com.hazelcast.test.Accessors.getNodeEngineImpl;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 @RunWith(HazelcastSerialClassRunner.class)
 @Category(QuickTest.class)
@@ -106,6 +110,30 @@ public class SystemLogPluginTest extends AbstractDiagnosticsPluginTest {
             plugin.run(logWriter);
             assertContains("MemberRemoved[");
         });
+    }
+
+    @Test
+    public void testMembership_jsonFormat_producesStructuredMemberEntries() {
+        HazelcastInstance instance = hzFactory.newHazelcastInstance(config);
+
+        CharArrayWriter jsonOut = new CharArrayWriter();
+        DiagnosticsLogWriterJsonImpl jsonWriter = new DiagnosticsLogWriterJsonImpl(false, null);
+
+        assertTrueEventually(() -> {
+            jsonOut.reset();
+            jsonWriter.init(new PrintWriter(jsonOut));
+            plugin.run(jsonWriter);
+
+            String output = jsonOut.toString();
+            assertTrue("Members section should contain structured address entries",
+                    output.contains("\"address\":"));
+            assertTrue("isThis field expected in JSON members output",
+                    output.contains("\"isThis\":"));
+            assertTrue("isMaster field expected in JSON members output",
+                    output.contains("\"isMaster\":"));
+        });
+
+        instance.shutdown();
     }
 
     @Test

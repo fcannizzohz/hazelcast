@@ -109,9 +109,9 @@ public class InvocationSamplePlugin extends DiagnosticsPlugin {
 
         runCurrent(writer, now);
 
-        renderHistory(writer);
+        renderOccurrences(writer, "History", occurrences);
 
-        renderSlowHistory(writer);
+        renderOccurrences(writer, "SlowHistory", slowOccurrences);
 
         writer.endSection();
     }
@@ -141,7 +141,11 @@ public class InvocationSamplePlugin extends DiagnosticsPlugin {
             // it is a slow invocation
             count++;
             if (count < maxCount) {
-                writer.writeEntry(invocation + " duration=" + durationMs + " ms");
+                if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+                    writer.writeStructuredEntry("description", invocation.toString(), "duration", durationMs, "unit", "ms");
+                } else {
+                    writer.writeEntry(invocation + " duration=" + durationMs + " ms");
+                }
             } else if (!maxPrinted) {
                 maxPrinted = true;
                 writer.writeEntry("max number of invocations to print reached.");
@@ -151,18 +155,14 @@ public class InvocationSamplePlugin extends DiagnosticsPlugin {
         writer.endSection();
     }
 
-    private void renderHistory(DiagnosticsLogWriter writer) {
-        writer.startSection("History");
-        for (String item : occurrences.descendingKeys()) {
-            writer.writeEntry(item + " samples=" + occurrences.get(item));
-        }
-        writer.endSection();
-    }
-
-    private void renderSlowHistory(DiagnosticsLogWriter writer) {
-        writer.startSection("SlowHistory");
-        for (String item : slowOccurrences.descendingKeys()) {
-            writer.writeEntry(item + " samples=" + slowOccurrences.get(item));
+    private void renderOccurrences(DiagnosticsLogWriter writer, String sectionName, ItemCounter<String> counter) {
+        writer.startSection(sectionName);
+        for (String item : counter.descendingKeys()) {
+            if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+                writer.writeStructuredEntry("operation", item, "samples", counter.get(item));
+            } else {
+                writer.writeEntry(item + " samples=" + counter.get(item));
+            }
         }
         writer.endSection();
     }

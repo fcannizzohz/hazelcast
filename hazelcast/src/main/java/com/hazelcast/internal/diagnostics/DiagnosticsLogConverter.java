@@ -1,0 +1,373 @@
+/*
+ * Copyright (c) 2008-2026, Hazelcast, Inc. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.hazelcast.internal.diagnostics;
+
+import com.hazelcast.logging.ILogger;
+import com.hazelcast.logging.Logger;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * A class that converts between STANDARD and JSON diagnostics log formats.
+ */
+public class DiagnosticsLogConverter {
+
+    private static final ILogger LOGGER = Logger.getLogger(DiagnosticsLogConverter.class);
+
+    private static final String TOP_LEVEL_PATTERN_STR =
+            "^(\\d{2}-\\d{2}-\\d{4} \\d{2}:\\d{2}:\\d{2}) (?:(\\d+) )?(.+)\\[\\]?$";
+    private static final Pattern TOP_LEVEL_PATTERN = Pattern.compile(TOP_LEVEL_PATTERN_STR);
+    private static final String INDENT = "                          ";
+    private static final int DEPTH_INDENT_SIZE = 8;
+
+    public static class DiagnosticEntry {
+        private String time;
+        private Long epoch;
+        private String name;
+        private Map<String, Object> content = new LinkedHashMap<>();
+
+        public String getTime() {
+            return time;
+        }
+
+        public Long getEpoch() {
+            return epoch;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public Map<String, Object> getContent() {
+            return content;
+        }
+
+        @Override
+        public String toString() {
+            return "DiagnosticEntry{time='" + time + "', epoch=" + epoch
+                    + ", name='" + name + "', content=" + content + "}";
+        }
+    }
+
+    public DiagnosticEntry parseStandard(String entryStr) {
+        if (entryStr == null || entryStr.trim().isEmpty()) {
+            return null;
+        }
+        String[] lines = entryStr.split("\\R");
+        if (lines.length == 0) {
+            return null;
+        }
+
+        Matcher matcher = TOP_LEVEL_PATTERN.matcher(lines[0]);
+        if (!matcher.matches()) {
+            LOGGER.severe("Failed to parse diagnostics entry metadata (first line): " + lines[0]);
+            return null;
+        }
+
+        DiagnosticEntry entry = new DiagnosticEntry();
+        entry.time = matcher.group(1);
+        String epochStr = matcher.group(2);
+        if (epochStr != null) {
+            entry.epoch = Long.parseLong(epochStr);
+        }
+        entry.name = unescape(matcher.group(3));
+
+        parseContent(lines, 1, entry.content, 0);
+
+        return entry;
+    }
+
+    private int parseContent(String[] lines, int lineIndex, Map<String, Object> content, int depth) {
+        while (lineIndex < lines.length) {
+            String line = lines[lineIndex];
+            if (line == null || line.trim().isEmpty()) {
+                lineIndex++;
+                continue;
+            }
+            if (line.trim().equals("]")) {
+                return lineIndex;
+            }
+            String contentLine = stripIndent(line, depth);
+            if (contentLine.endsWith("[")) {
+                lineIndex = parseSectionLine(lines, lineIndex, content, contentLine, depth);
+            } else {
+                int closingBrackets = countTrailingBrackets(contentLine);
+                String temp = contentLine.substring(0, contentLine.length() - closingBrackets);
+                if (endsWithUnescapedOpenBracket(temp)) {
+                    // Empty section inline: e.g. "Name[]" or "Name[]]"
+                    // The first ] closes the empty section itself; remaining ] close parent scopes.
+                    addEmptySection(content, temp);
+                    int parentCloses = closingBrackets - 1;
+                    if (parentCloses > 0) {
+                        return returnWithRemainingBrackets(lines, lineIndex, parentCloses);
+                    }
+                } else {
+                    parseValueLine(temp, content);
+                    if (closingBrackets > 0) {
+                        return returnWithRemainingBrackets(lines, lineIndex, closingBrackets);
+                    }
+                }
+            }
+            lineIndex++;
+        }
+        return lineIndex;
+    }
+
+    private int parseSectionLine(String[] lines, int lineIndex,
+                                 Map<String, Object> content, String contentLine, int depth) {
+        String sectionName = unescape(contentLine.substring(0, contentLine.length() - 1).trim());
+        Map<String, Object> subSection = new LinkedHashMap<>();
+        putValue(content, sectionName, subSection);
+        return parseContent(lines, lineIndex + 1, subSection, depth + 1);
+    }
+
+    private String stripIndent(String line, int depth) {
+        if (!line.startsWith(INDENT)) {
+            return line;
+        }
+        String result = line.substring(INDENT.length());
+        for (int i = 0; i < depth; i++) {
+            if (result.startsWith("        ")) {
+                result = result.substring(DEPTH_INDENT_SIZE);
+            } else {
+                break;
+            }
+        }
+        return result;
+    }
+
+    private void parseValueLine(String temp, Map<String, Object> content) {
+        int eqIndex = findUnescaped(temp, '=');
+        if (eqIndex != -1) {
+            String key = unescape(temp.substring(0, eqIndex).trim());
+            String value = temp.substring(eqIndex + 1).trim();
+            putValue(content, key, tryParseNumber(unescape(value)));
+        } else {
+            String value = temp.trim();
+            if (!value.isEmpty()) {
+                putValue(content, "entries", unescape(value));
+            }
+        }
+    }
+
+    private static int countTrailingBrackets(String line) {
+        int count = 0;
+        for (int i = line.length() - 1; i >= 0 && line.charAt(i) == ']'; i--) {
+            count++;
+        }
+        return count;
+    }
+
+    /**
+     * Returns true when the string ends with an unescaped {@code [} character.
+     * An even number of preceding backslashes means the bracket is not escaped.
+     */
+    private static boolean endsWithUnescapedOpenBracket(String s) {
+        if (s.isEmpty() || s.charAt(s.length() - 1) != '[') {
+            return false;
+        }
+        int backslashCount = 0;
+        for (int i = s.length() - 2; i >= 0 && s.charAt(i) == '\\'; i--) {
+            backslashCount++;
+        }
+        return backslashCount % 2 == 0;
+    }
+
+    private void addEmptySection(Map<String, Object> content, String sectionLine) {
+        String sectionName = unescape(sectionLine.substring(0, sectionLine.length() - 1).trim());
+        putValue(content, sectionName, new LinkedHashMap<>());
+    }
+
+    private static String repeatBrackets(int count) {
+        StringBuilder sb = new StringBuilder(count);
+        for (int i = 0; i < count; i++) {
+            sb.append(']');
+        }
+        return sb.toString();
+    }
+
+    /**
+     * If more than one closing bracket needs to be returned, stores the remainder in the
+     * line array so the caller can process it, then returns lineIndex.
+     */
+    private static int returnWithRemainingBrackets(String[] lines, int lineIndex, int closingBrackets) {
+        if (closingBrackets > 1) {
+            lines[lineIndex] = repeatBrackets(closingBrackets - 1);
+        }
+        return lineIndex;
+    }
+
+    private void putValue(Map<String, Object> content, String key, Object value) {
+        if ("entries".equals(key)) {
+            Object existing = content.get(key);
+            if (existing == null) {
+                List<Object> list = new ArrayList<>();
+                list.add(value);
+                content.put(key, list);
+            } else {
+                ((List<Object>) existing).add(value);
+            }
+            return;
+        }
+        Object existing = content.get(key);
+        if (existing == null) {
+            content.put(key, value);
+        } else if (existing instanceof List) {
+            ((List<Object>) existing).add(value);
+        } else {
+            List<Object> list = new ArrayList<>();
+            list.add(existing);
+            list.add(value);
+            content.put(key, list);
+        }
+    }
+
+    private int findUnescaped(String s, char target) {
+        for (int i = 0; i < s.length(); i++) {
+            if (s.charAt(i) == target) {
+                if (i == 0 || s.charAt(i - 1) != '\\') {
+                    return i;
+                }
+                // It might be double escaped \\=
+                int backslashCount = 0;
+                for (int j = i - 1; j >= 0 && s.charAt(j) == '\\'; j--) {
+                    backslashCount++;
+                }
+                if (backslashCount % 2 == 0) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    private Object tryParseNumber(String value) {
+        if (value == null || value.equals("null")) {
+            return null;
+        }
+        if (value.equals("true")) {
+            return true;
+        }
+        if (value.equals("false")) {
+            return false;
+        }
+        try {
+            // Remove commas from numbers like 1,234,567
+            String cleanValue = value.replace(",", "");
+            if (cleanValue.contains(".")) {
+                return Double.parseDouble(cleanValue);
+            } else {
+                return Long.parseLong(cleanValue);
+            }
+        } catch (NumberFormatException e) {
+            return value;
+        }
+    }
+
+    private String unescape(String s) {
+        if (s == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '\\' && i + 1 < s.length()) {
+                char next = s.charAt(i + 1);
+                switch (next) {
+                    case '\\': sb.append('\\'); break;
+                    case '[': sb.append('['); break;
+                    case ']': sb.append(']'); break;
+                    case '=': sb.append('='); break;
+                    case 'n': sb.append('\n'); break;
+                    case 'r': sb.append('\r'); break;
+                    default: sb.append(c); sb.append(next); break;
+                }
+                i++;
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
+    public String toJson(DiagnosticEntry entry) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"time\":\"").append(entry.time).append("\"");
+        if (entry.epoch != null) {
+            sb.append(",\"epoch\":").append(entry.epoch);
+        }
+        sb.append(",\"name\":\"").append(escapeJson(entry.name)).append("\"");
+        sb.append(",\"content\":");
+        appendMapToJson(sb, entry.content);
+        sb.append("}");
+        return sb.toString();
+    }
+
+    private void appendMapToJson(StringBuilder sb, Map<String, Object> map) {
+        sb.append("{");
+        boolean first = true;
+        for (Map.Entry<String, Object> entry : map.entrySet()) {
+            if (!first) {
+                sb.append(",");
+            }
+            sb.append("\"").append(escapeJson(entry.getKey())).append("\":");
+            appendValueToJson(sb, entry.getValue());
+            first = false;
+        }
+        sb.append("}");
+    }
+
+    private void appendValueToJson(StringBuilder sb, Object value) {
+        if (value instanceof Map) {
+            appendMapToJson(sb, (Map<String, Object>) value);
+        } else if (value instanceof List) {
+            sb.append("[");
+            boolean first = true;
+            for (Object item : (List<Object>) value) {
+                if (!first) {
+                    sb.append(",");
+                }
+                appendValueToJson(sb, item);
+                first = false;
+            }
+            sb.append("]");
+        } else if (value instanceof String) {
+            sb.append("\"").append(escapeJson((String) value)).append("\"");
+        } else if (value == null) {
+            sb.append("null");
+        } else {
+            sb.append(value);
+        }
+    }
+
+    private String escapeJson(String s) {
+        if (s == null) {
+            return null;
+        }
+        return s.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\b", "\\b")
+                .replace("\f", "\\f")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
+    }
+}

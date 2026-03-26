@@ -53,12 +53,21 @@ public class BuildInfoPlugin extends DiagnosticsPlugin {
         // no properties to read
     }
 
+    private void writeBuildNumber(DiagnosticsLogWriter writer) {
+        if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+            // In JSON format, emit as a numeric value directly.
+            writer.writeKeyValueEntry("BuildNumber", (long) buildInfo.getBuildNumber());
+        } else {
+            // In STANDARD format, convert to String to prevent comma-grouping.
+            writer.writeKeyValueEntry("BuildNumber", String.valueOf(buildInfo.getBuildNumber()));
+        }
+    }
+
     @Override
     public void run(DiagnosticsLogWriter writer) {
         writer.startSection("BuildInfo");
         writer.writeKeyValueEntry("Build", buildInfo.getBuild());
-        // we convert to string to prevent formatting the number
-        writer.writeKeyValueEntry("BuildNumber", String.valueOf(buildInfo.getBuildNumber()));
+        writeBuildNumber(writer);
         writer.writeKeyValueEntry("Revision", buildInfo.getRevision());
         BuildInfo upstreamBuildInfo = buildInfo.getUpstreamBuildInfo();
         if (upstreamBuildInfo != null) {

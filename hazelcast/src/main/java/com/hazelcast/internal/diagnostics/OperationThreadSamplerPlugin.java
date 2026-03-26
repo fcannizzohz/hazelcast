@@ -74,7 +74,7 @@ public class OperationThreadSamplerPlugin extends DiagnosticsPlugin {
      */
     public static final HazelcastProperty INCLUDE_NAME
             = new HazelcastProperty("hazelcast.diagnostics.operationthreadsamples.includeName", false);
-    public static final float HUNDRED = 100f;
+    private static final float HUNDRED = 100f;
 
     protected final ConcurrentItemCounter<String> partitionSpecificSamples = new ConcurrentItemCounter<>();
     protected final ConcurrentItemCounter<String> genericSamples = new ConcurrentItemCounter<>();
@@ -137,8 +137,13 @@ public class OperationThreadSamplerPlugin extends DiagnosticsPlugin {
         long total = samples.total();
         for (String name : samples.keySet()) {
             long s = samples.get(name);
-            String entryStr = total == 0L ? String.valueOf(s) : (s + " " + (HUNDRED * s / total) + "%");
-            writer.writeKeyValueEntry(name, entryStr);
+            if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+                double pct = total == 0L ? 0.0 : (HUNDRED * s / total);
+                writer.writeStructuredEntry("operation", name, "samples", s, "percentage", pct);
+            } else {
+                String entryStr = total == 0L ? String.valueOf(s) : (s + " " + (HUNDRED * s / total) + "%");
+                writer.writeKeyValueEntry(name, entryStr);
+            }
         }
         writer.endSection();
     }
@@ -175,17 +180,10 @@ public class OperationThreadSamplerPlugin extends DiagnosticsPlugin {
         }
 
         private String toKey(Object task) {
-            String name;
-            if (includeName) {
-                if (task instanceof NamedOperation operation) {
-                    name = task.getClass().getName() + "#" + operation.getName();
-                } else {
-                    name = task.getClass().getName();
-                }
-            } else {
-                name = task.getClass().getName();
+            if (includeName && task instanceof NamedOperation operation) {
+                return task.getClass().getName() + "#" + operation.getName();
             }
-            return name;
+            return task.getClass().getName();
         }
     }
 }

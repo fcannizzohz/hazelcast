@@ -54,7 +54,6 @@ public class InvocationProfilerPlugin extends DiagnosticsPlugin {
 
     @Override
     public void onStart() {
-        this.periodMs = this.properties.getMillis(overrideProperty(PERIOD_SECONDS));
         super.onStart();
         logger.info("Plugin:active: period-millis:" + periodMs);
     }

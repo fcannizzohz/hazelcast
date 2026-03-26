@@ -50,7 +50,7 @@ final class DiagnosticsLogFile implements DiagnosticsLog {
     private final Diagnostics diagnostics;
     private final ILogger logger;
     private final String fileName;
-    private final DiagnosticsLogWriterImpl logWriter;
+    private final DiagnosticsLogWriter logWriter;
 
     private int index;
     private PrintWriter printWriter;
@@ -63,7 +63,8 @@ final class DiagnosticsLogFile implements DiagnosticsLog {
         this.diagnostics = diagnostics;
         this.logger = diagnostics.logger;
         this.fileName = diagnostics.getFileName() + "-%03d.log";
-        this.logWriter = new DiagnosticsLogWriterImpl(diagnostics.isIncludeEpochTime(), diagnostics.logger);
+        this.logWriter = DiagnosticsLogWriterFactory.create(diagnostics.getDiagnosticsConfig().getLogFormat(),
+                diagnostics.isIncludeEpochTime(), diagnostics.logger);
 
         createDirectoryIfDoesNotExist();
 

@@ -141,32 +141,42 @@ public class NetworkingImbalancePlugin extends DiagnosticsPlugin {
 
         for (NioThread thread : threads) {
             writer.startSection(thread.getName());
-            writer.writeKeyValueEntry("frames-percentage", toPercentage(thread.framesTransceived(), totalFramesReceived));
+            writePercentageEntry(writer, "frames-percentage", thread.framesTransceived(), totalFramesReceived);
             writer.writeKeyValueEntry("frames", thread.framesTransceived());
-            writer.writeKeyValueEntry("priority-frames-percentage",
-                    toPercentage(thread.priorityFramesTransceived(), totalPriorityFramesReceived));
+            writePercentageEntry(writer, "priority-frames-percentage",
+                    thread.priorityFramesTransceived(), totalPriorityFramesReceived);
             writer.writeKeyValueEntry("priority-frames", thread.priorityFramesTransceived());
-            writer.writeKeyValueEntry("bytes-percentage", toPercentage(thread.bytesTransceived(), totalBytesReceived));
+            writePercentageEntry(writer, "bytes-percentage", thread.bytesTransceived(), totalBytesReceived);
             writer.writeKeyValueEntry("bytes", thread.bytesTransceived());
-            writer.writeKeyValueEntry("events-percentage", toPercentage(thread.eventCount(), totalEvents));
+            writePercentageEntry(writer, "events-percentage", thread.eventCount(), totalEvents);
             writer.writeKeyValueEntry("events", thread.eventCount());
-            writer.writeKeyValueEntry("handle-count-percentage", toPercentage(thread.handleCount(), totalHandleCount));
+            writePercentageEntry(writer, "handle-count-percentage", thread.handleCount(), totalHandleCount);
             writer.writeKeyValueEntry("handle-count", thread.handleCount());
-            writer.writeKeyValueEntry("tasks-percentage", toPercentage(thread.completedTaskCount(), totalTaskCount));
+            writePercentageEntry(writer, "tasks-percentage", thread.completedTaskCount(), totalTaskCount);
             writer.writeKeyValueEntry("tasks", thread.completedTaskCount());
             writer.endSection();
         }
     }
 
-    private String toPercentage(long amount, long total) {
-        final double percentage;
-        if (amount == 0L) {
-            percentage = 0D;
-        } else if (total == 0L) {
-            percentage = Double.NaN;
+    private void writePercentageEntry(DiagnosticsLogWriter writer, String key, long amount, long total) {
+        if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+            writer.writeKeyValueEntry(key, toPercentageDouble(amount, total));
         } else {
-            percentage = (HUNDRED * amount) / total;
+            writer.writeKeyValueEntry(key, toPercentageString(amount, total));
         }
-        return String.format("%1$,.2f", percentage) + " %";
+    }
+
+    private double toPercentageDouble(long amount, long total) {
+        if (amount == 0L) {
+            return 0D;
+        }
+        if (total == 0L) {
+            return Double.NaN;
+        }
+        return (HUNDRED * amount) / total;
+    }
+
+    private String toPercentageString(long amount, long total) {
+        return String.format("%1$,.2f", toPercentageDouble(amount, total)) + " %";
     }
 }

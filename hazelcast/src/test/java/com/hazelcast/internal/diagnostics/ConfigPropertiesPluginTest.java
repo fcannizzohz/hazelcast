@@ -26,9 +26,13 @@ import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 
+import java.io.CharArrayWriter;
+import java.io.PrintWriter;
+
 import static com.hazelcast.internal.diagnostics.DiagnosticsPlugin.RUN_ONCE_PERIOD_MS;
 import static com.hazelcast.test.Accessors.getNodeEngineImpl;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 @RunWith(HazelcastParallelClassRunner.class)
 @Category(QuickTest.class)
@@ -57,5 +61,19 @@ public class ConfigPropertiesPluginTest extends AbstractDiagnosticsPluginTest {
         plugin.run(logWriter);
         assertContains("property1=value1");
         assertContains("property2=value2");
+    }
+
+    @Test
+    public void testRun_jsonFormat_emitsKeyValuePairs() {
+        CharArrayWriter out = new CharArrayWriter();
+        DiagnosticsLogWriterJsonImpl jsonWriter = new DiagnosticsLogWriterJsonImpl(false, null);
+        jsonWriter.init(new PrintWriter(out));
+
+        plugin.run(jsonWriter);
+
+        String output = out.toString();
+        assertTrue("Expected ConfigProperties section", output.contains("\"ConfigProperties\""));
+        assertTrue("Expected property1", output.contains("\"property1\":\"value1\""));
+        assertTrue("Expected property2", output.contains("\"property2\":\"value2\""));
     }
 }

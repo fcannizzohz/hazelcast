@@ -25,10 +25,13 @@ import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 
+import java.io.CharArrayWriter;
+import java.io.PrintWriter;
 import java.util.Properties;
 
 import static com.hazelcast.test.Accessors.getNodeEngineImpl;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 @RunWith(HazelcastParallelClassRunner.class)
 @Category(QuickTest.class)
@@ -76,5 +79,19 @@ public class SystemPropertiesPluginTest extends AbstractDiagnosticsPluginTest {
 
         // we don't want to have awt
         assertNotContains("java.awt");
+    }
+
+    @Test
+    public void testRun_jsonFormat_emitsKeyValuePairs() {
+        CharArrayWriter out = new CharArrayWriter();
+        DiagnosticsLogWriterJsonImpl jsonWriter = new DiagnosticsLogWriterJsonImpl(false, null);
+        jsonWriter.init(new PrintWriter(out));
+
+        plugin.run(jsonWriter);
+
+        String output = out.toString();
+        assertTrue("Expected SystemProperties section", output.contains("\"SystemProperties\""));
+        assertTrue("Expected hazelcast fake property in JSON", output.contains("\"" + FAKE_PROPERTY + "\""));
+        assertTrue("Expected java.vm.args key", output.contains("\"" + SystemPropertiesPlugin.JVM_ARGS + "\""));
     }
 }

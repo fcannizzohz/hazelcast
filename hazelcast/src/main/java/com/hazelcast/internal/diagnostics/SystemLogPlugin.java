@@ -217,7 +217,11 @@ public class SystemLogPlugin extends DiagnosticsPlugin {
 
     private void render(DiagnosticsLogWriter writer, LifecycleEvent event) {
         writer.startSection("Lifecycle");
-        writer.writeEntry(event.getState().name());
+        if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+            writer.writeStructuredEntry("state", event.getState().name());
+        } else {
+            writer.writeEntry(event.getState().name());
+        }
         writer.endSection();
     }
 
@@ -239,7 +243,12 @@ public class SystemLogPlugin extends DiagnosticsPlugin {
             for (Member member : members) {
                 Address memberAddress = member.getAddress();
                 String addressStr = String.valueOf(memberAddress);
-                if (memberAddress.equals(thisAddress)) {
+                if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+                    writer.writeStructuredEntry(
+                            "address", addressStr,
+                            "isThis", memberAddress.equals(thisAddress),
+                            "isMaster", first);
+                } else if (memberAddress.equals(thisAddress)) {
                     if (first) {
                         writer.writeEntry(addressStr + ":this:master");
                     } else {
@@ -296,7 +305,11 @@ public class SystemLogPlugin extends DiagnosticsPlugin {
         }
 
         Connection connection = event.connection;
-        writer.writeEntry(connection.toString());
+        if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+            writer.writeStructuredEntry("connection", connection.toString());
+        } else {
+            writer.writeEntry(connection.toString());
+        }
 
         if (connection instanceof ServerConnection serverConnection) {
             writer.writeKeyValueEntry("type", serverConnection.getConnectionType());
@@ -304,32 +317,43 @@ public class SystemLogPlugin extends DiagnosticsPlugin {
         writer.writeKeyValueEntry("isAlive", connection.isAlive());
 
         if (!event.added) {
-            String closeReason = connection.getCloseReason();
-            Throwable closeCause = connection.getCloseCause();
-            if (closeReason == null && closeCause != null) {
-                closeReason = closeCause.getMessage();
-            }
-
-            writer.writeKeyValueEntry("closeReason", closeReason == null ? "Unknown" : closeReason);
-
-            if (closeCause != null) {
-                writer.startSection("CloseCause");
-                String s = closeCause.getClass().getName();
-                String message = closeCause.getMessage();
-                writer.writeEntry((message != null) ? (s + ": " + message) : s);
-
-                for (StackTraceElement element : closeCause.getStackTrace()) {
-                    writer.writeEntry(element.toString());
-                }
-                writer.endSection();
-            }
+            renderConnectionClose(writer, connection);
         }
         writer.endSection();
     }
 
+    @SuppressWarnings("ThrowableResultOfMethodCallIgnored")
+    private void renderConnectionClose(DiagnosticsLogWriter writer, Connection connection) {
+        String closeReason = connection.getCloseReason();
+        Throwable closeCause = connection.getCloseCause();
+        if (closeReason == null && closeCause != null) {
+            closeReason = closeCause.getMessage();
+        }
+        writer.writeKeyValueEntry("closeReason", closeReason == null ? "Unknown" : closeReason);
+
+        if (closeCause != null) {
+            writer.startSection("CloseCause");
+            String s = closeCause.getClass().getName();
+            String message = closeCause.getMessage();
+            if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+                writer.writeStructuredEntry("exceptionClass", s, "message", message);
+            } else {
+                writer.writeEntry((message != null) ? (s + ": " + message) : s);
+            }
+            for (StackTraceElement element : closeCause.getStackTrace()) {
+                writer.writeEntry(element.toString());
+            }
+            writer.endSection();
+        }
+    }
+
     private void render(DiagnosticsLogWriter writer, Version version) {
         writer.startSection("ClusterVersionChanged");
-        writer.writeEntry(version.toString());
+        if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+            writer.writeStructuredEntry("version", version.toString());
+        } else {
+            writer.writeEntry(version.toString());
+        }
         writer.endSection();
     }
 

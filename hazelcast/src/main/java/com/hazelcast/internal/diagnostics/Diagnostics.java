@@ -154,6 +154,18 @@ public class Diagnostics {
             DiagnosticsOutputType.FILE);
 
     /**
+     * The format of the diagnostics log.
+     * <p>
+     * Options are:
+     * <ul>
+     * <li>{@link DiagnosticsLogFormat#STANDARD}: (default) the standard format</li>
+     * <li>{@link DiagnosticsLogFormat#JSON}: a single line JSON format</li>
+     * </ul>
+     */
+    public static final HazelcastProperty LOG_FORMAT = new HazelcastProperty("hazelcast.diagnostics.format",
+            DiagnosticsLogFormat.STANDARD);
+
+    /**
      * The diagnostics service is shutdown completely,
      * so that registered plugins will stop to be working and resources will be released.
      */
@@ -202,6 +214,7 @@ public class Diagnostics {
     // each start of the diagnostics service will create a new time stamp for that "session"
     private String baseFileNameWithTime;
     private DiagnosticsOutputType outputType;
+    private DiagnosticsLogFormat logFormat;
     private DiagnosticsConfig config = new DiagnosticsConfig();
     private File loggingDirectory = new File(DIRECTORY.getDefaultValue());
     private String filePrefix;
@@ -636,6 +649,13 @@ public class Diagnostics {
             this.outputType = newConfig.getOutputType();
         }
 
+        if (hazelcastProperties.containsKey(LOG_FORMAT)) {
+            this.logFormat = hazelcastProperties.getEnum(LOG_FORMAT, DiagnosticsLogFormat.class);
+            messages.add(LOG_FORMAT.getName() + " = " + logFormat);
+        } else {
+            this.logFormat = newConfig.getLogFormat();
+        }
+
         if (hazelcastProperties.containsKey(MAX_ROLLED_FILE_SIZE_MB)) {
             this.maxRollingFileSizeMB = hazelcastProperties.getFloat(MAX_ROLLED_FILE_SIZE_MB);
             messages.add(MAX_ROLLED_FILE_SIZE_MB.getName() + " = "
@@ -686,6 +706,7 @@ public class Diagnostics {
 
         // the config may be overridden by the properties, so we need to set it again
         this.config.setOutputType(outputType);
+        this.config.setLogFormat(logFormat);
         this.config.setMaxRolledFileSizeInMB(maxRollingFileSizeMB);
         this.config.setMaxRolledFileCount(maxRollingFileCount);
         this.config.setLogDirectory(loggingDirectory.getAbsolutePath());

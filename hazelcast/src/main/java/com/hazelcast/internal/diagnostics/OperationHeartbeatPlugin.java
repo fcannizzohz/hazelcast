@@ -73,7 +73,6 @@ public class OperationHeartbeatPlugin extends DiagnosticsPlugin {
     public OperationHeartbeatPlugin(ILogger logger, InvocationMonitor invocationMonitor, HazelcastProperties properties) {
         super(logger);
         this.properties = properties;
-        readProperties();
         this.expectedIntervalMillis = invocationMonitor.getHeartbeatBroadcastPeriodMillis();
         this.heartbeatPerMember = invocationMonitor.getHeartbeatPerMember();
         readProperties();

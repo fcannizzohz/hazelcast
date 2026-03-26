@@ -98,7 +98,11 @@ public class MemberHazelcastInstanceInfoPlugin extends DiagnosticsPlugin {
 
         writer.startSection("Members");
         for (Member member : nodeEngine.getClusterService().getMemberImpls()) {
-            writer.writeEntry(member.getAddress().toString());
+            if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+                writer.writeStructuredEntry("address", member.getAddress().toString());
+            } else {
+                writer.writeEntry(member.getAddress().toString());
+            }
         }
         writer.endSection();
 

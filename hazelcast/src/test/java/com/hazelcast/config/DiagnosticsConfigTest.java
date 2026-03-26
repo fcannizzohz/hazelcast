@@ -16,6 +16,7 @@
 package com.hazelcast.config;
 
 import com.hazelcast.internal.diagnostics.DiagnosticsConfig;
+import com.hazelcast.internal.diagnostics.DiagnosticsLogFormat;
 import com.hazelcast.internal.diagnostics.DiagnosticsOutputType;
 import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.internal.serialization.SerializationService;
@@ -56,7 +57,8 @@ public class DiagnosticsConfigTest {
                 .setMaxRolledFileSizeInMB(99)
                 .setMaxRolledFileCount(89)
                 .setAutoOffDurationInMinutes(5)
-                .setEnabled(true);
+                .setEnabled(true)
+                .setLogFormat(DiagnosticsLogFormat.JSON);
         config.getPluginProperties().put("prop1", "prop1");
 
         SerializationService ss = new DefaultSerializationServiceBuilder().build();
@@ -72,6 +74,7 @@ public class DiagnosticsConfigTest {
         assertEquals(config.getOutputType(), deserializedConfig.getOutputType());
         assertEquals(config.isIncludeEpochTime(), deserializedConfig.isIncludeEpochTime());
         assertEquals(config.getAutoOffDurationInMinutes(), deserializedConfig.getAutoOffDurationInMinutes());
+        assertEquals(config.getLogFormat(), deserializedConfig.getLogFormat());
     }
 
     @Test

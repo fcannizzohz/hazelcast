@@ -278,22 +278,8 @@ public class StoreLatencyPlugin extends DiagnosticsPlugin {
             if (stats.count() == 0) {
                 return;
             }
-
             writer.startSection(methodName);
-            writer.writeKeyValueEntry("count", stats.count());
-            writer.writeKeyValueEntry("totalTime(us)", stats.totalMicros());
-            writer.writeKeyValueEntry("avg(us)", distribution.avgMicros());
-            writer.writeKeyValueEntry("max(us)", stats.maxMicros());
-
-            writer.startSection("latency-distribution");
-            for (int bucket = 0; bucket < stats.bucketCount(); bucket++) {
-                long value = stats.bucket(bucket);
-                if (value > 0) {
-                    writer.writeKeyValueEntry(LatencyDistribution.LATENCY_KEYS[bucket], value);
-                }
-            }
-            writer.endSection();
-
+            OperationProfilerPlugin.writeLatencyStats(writer, stats);
             writer.endSection();
         }
 

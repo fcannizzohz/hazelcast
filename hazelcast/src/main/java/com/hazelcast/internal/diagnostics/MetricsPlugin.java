@@ -100,7 +100,8 @@ public class MetricsPlugin extends DiagnosticsPlugin {
         private static final String SECTION_NAME = "Metric";
 
         private DiagnosticsLogWriter writer;
-        private long timeMillis;
+        private long
+                timeMillis;
 
         @Override
         public void collectLong(MetricDescriptor descriptor, long value) {
