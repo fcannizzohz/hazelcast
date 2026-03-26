@@ -119,9 +119,11 @@ public class OperationHeartbeatPlugin extends DiagnosticsPlugin {
                 writer.writeKeyValueEntry("deviation(%)", deviation);
                 writer.writeKeyValueEntry("noHeartbeat(ms)", noHeartbeatMillis);
                 writer.writeKeyValueEntry("lastHeartbeat(ms)", lastHeartbeatMillis);
-                writer.writeKeyValueEntryAsDateTime("lastHeartbeat(date-time)", lastHeartbeatMillis);
                 writer.writeKeyValueEntry("now(ms)", nowMillis);
-                writer.writeKeyValueEntryAsDateTime("now(date-time)", nowMillis);
+                if (writer.getFormat() != DiagnosticsLogFormat.JSON) {
+                    writer.writeKeyValueEntryAsDateTime("lastHeartbeat(date-time)", lastHeartbeatMillis);
+                    writer.writeKeyValueEntryAsDateTime("now(date-time)", nowMillis);
+                }
                 writer.endSection();
             }
             if (!isActive()) {
