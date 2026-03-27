@@ -1,0 +1,157 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "diagnostics-log-entry.schema.json",
+  "title": "Hazelcast Diagnostics Log Entry",
+  "description": "Schema for a single newline-terminated JSON object produced by Hazelcast Diagnostics when DiagnosticsLogFormat.JSON is configured. One object is emitted per plugin execution. Output is compact JSON with no whitespace between tokens.",
+  "$comment": "Loki / Grafana ingestion: (1) use a Promtail/Alloy timestamp stage pointing at 'epoch' with format 'UnixMs'; (2) promote 'name' to a stream label so streams can be selected with {name=\"Metric\"} or {name=\"SlowOperations\"}; (3) parse remaining fields with the 'json' pipeline stage.",
+  "type": "object",
+  "required": ["time", "epoch", "name", "content"],
+  "additionalProperties": false,
+  "$comment_required": "epoch is always present: DiagnosticsLogWriterJsonImpl emits it directly; DiagnosticsLogConverter derives it from the 'time' field (second precision, millis=000) when the source STANDARD log was written without epoch.",
+  "properties": {
+    "time": {
+      "type": "string",
+      "description": "Wall-clock timestamp in the JVM default timezone, formatted as dd-MM-yyyy HH:mm:ss. Note: day-first, NOT ISO 8601. Parsers needing a timezone-independent timestamp must use 'epoch' instead.",
+      "pattern": "^\\d{2}-\\d{2}-\\d{4} \\d{2}:\\d{2}:\\d{2}$",
+      "examples": ["25-03-2026 14:30:00"]
+    },
+    "epoch": {
+      "type": "integer",
+      "description": "Unix epoch time in milliseconds. Always present: DiagnosticsLogWriterJsonImpl emits it directly; DiagnosticsLogConverter derives it from the 'time' field (second precision, millis=000) when the source STANDARD log had no epoch. Recommended timestamp source for Loki (configure as 'UnixMs' in Promtail/Alloy timestamp stage). All lines from a single MetricsPlugin collection share the same epoch value.",
+      "minimum": 0,
+      "examples": [1711374600000]
+    },
+    "name": {
+      "type": "string",
+      "description": "Identifies the diagnostics plugin or event type that produced this line. Use as a Loki stream label for efficient log stream selection and filtering. Examples: name=\"Metric\", name=\"SlowOperations\", name=\"OverloadedConnections\". StoreLatencyPlugin uses the service name (e.g. MapService, CacheService) — any name not in the known list is a StoreLatency line.",
+      "minLength": 1,
+      "examples": [
+        "BuildInfo",
+        "ConfigProperties",
+        "SystemProperties",
+        "Metric",
+        "EventQueues",
+        "PendingInvocations",
+        "SlowOperations",
+        "Lifecycle",
+        "MemberAdded",
+        "MemberRemoved",
+        "ConnectionAdded",
+        "ConnectionRemoved",
+        "ClusterVersionChanged",
+        "MigrationState",
+        "MigrationCompleted",
+        "MigrationFailed",
+        "OperationHeartbeat",
+        "MemberHeartbeats",
+        "NetworkingImbalance",
+        "OverloadedConnections",
+        "OperationsProfiler",
+        "InvocationProfiler",
+        "OperationThreadSamples",
+        "HazelcastInstance",
+        "Invocations",
+        "MapService",
+        "CacheService"
+      ]
+    },
+    "content": {
+      "allOf": [{"$ref": "#/$defs/section"}],
+      "description": "Plugin-specific payload. Always a JSON object, never null. Structure varies by plugin — see the per-plugin catalogue in diag_in_json.md. For Loki: after the 'json' pipeline stage, nested fields are accessible as content_fieldName."
+    }
+  },
+  "$defs": {
+    "section": {
+      "type": "object",
+      "description": "A diagnostics section. Keys are plugin-defined strings. Values are primitives, nested sections, or the reserved 'entries' array. The 'entries' key is absent (not null, not []) when no writeEntry/writeStructuredEntry calls were made in that section.",
+      "additionalProperties": {
+        "$ref": "#/$defs/value"
+      }
+    },
+    "textEntry": {
+      "title": "TextEntry",
+      "type": "object",
+      "description": "A plain-text entry produced by writeEntry(String). The string is JSON-escaped and wrapped under the 'text' key.",
+      "required": ["text"],
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "The plain-text value passed to writeEntry()."
+        }
+      }
+    },
+    "structuredEntry": {
+      "title": "StructuredEntry",
+      "allOf": [{"$ref": "#/$defs/section"}],
+      "description": "A structured entry produced by writeStructuredEntry(Object... kvPairs). Carries plugin-defined key/value pairs as a JSON object."
+    },
+    "entryItem": {
+      "title": "EntryItem",
+      "description": "A single item inside an 'entries' array. Always a JSON object. Either a TextEntry ({\"text\":\"...\"}) from writeEntry(), or a StructuredEntry with plugin-defined keys from writeStructuredEntry().",
+      "anyOf": [
+        {"$ref": "#/$defs/textEntry"},
+        {"$ref": "#/$defs/structuredEntry"}
+      ]
+    },
+    "value": {
+      "title": "SectionValue",
+      "description": "Any value that may appear as a property value inside a diagnostics section.",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "String value, including datetime strings from writeKeyValueEntryAsDateTime. The string literal 'null' (quoted) indicates a Java null passed to writeKeyValueEntry(key, String)."
+        },
+        {
+          "type": "integer",
+          "description": "Long or int value from writeKeyValueEntry(key, long) or writeKeyValueEntry(key, int)."
+        },
+        {
+          "type": "number",
+          "description": "Floating-point value from writeKeyValueEntry(key, double). Note: NaN is emitted as the bare token NaN which is not strictly valid JSON — validators and parsers should be tolerant if diagnostics data includes NaN metric values."
+        },
+        {
+          "type": "boolean",
+          "description": "Boolean value from writeKeyValueEntry(key, boolean)."
+        },
+        {
+          "type": "null",
+          "description": "Explicit null produced by writeStructuredEntry when a null value argument is passed."
+        },
+        {
+          "type": "array",
+          "title": "EntriesArray",
+          "description": "The reserved 'entries' array produced by writeEntry() and/or writeStructuredEntry(). Items are always JSON objects (never bare primitives): writeEntry() wraps strings as {\"text\":\"...\"}; writeStructuredEntry() produces plugin-defined key/value objects. Always present as an array even for a single call; never empty.",
+          "items": {"$ref": "#/$defs/entryItem"},
+          "minItems": 1
+        },
+        {
+          "type": "array",
+          "title": "NamedArray",
+          "description": "A named array produced by startArrayItemSection(). Each item is a section object. Used by OverloadedConnectionsPlugin for the 'connection' key to avoid duplicate JSON keys when the same connection appears in both normal and priority queue scans.",
+          "items": {"$ref": "#/$defs/section"},
+          "minItems": 1
+        },
+        {
+          "allOf": [{"$ref": "#/$defs/section"}],
+          "description": "Nested section object produced by a startSection/endSection pair inside a parent section."
+        }
+      ]
+    },
+    "metricKey": {
+      "type": "string",
+      "title": "MetricKey",
+      "description": "The parsed metric key used as a dynamic property name in Metric content objects. Format: [prefix.]metric[discriminator=value][tag=value]*(unit). Prefix and metric are dot-separated path segments. Discriminator/tag segments use [key=value] bracket notation. Unit (if present) is parenthesised and lower-cased. Absence of a unit segment means the metric has no unit.",
+      "examples": [
+        "jvm.memory.heap.used(bytes)",
+        "jvm.memory.heap.used(percent)",
+        "jvm.memory.heap.max(bytes)",
+        "os.cpu.load",
+        "os.processCpuLoad(percent)",
+        "map.size[instance=myMap]",
+        "map.get[instance=myMap](us)",
+        "map.hits[instance=myMap]"
+      ]
+    }
+  }
+}

@@ -68,6 +68,30 @@ public interface DiagnosticsLogWriter {
         writeEntry(sb.toString());
     }
 
+    /**
+     * Starts a new object within a named array at the current section level.
+     * Multiple calls with the same {@code arrayKey} append further items.
+     *
+     * <p>In JSON format: creates or appends to {@code "arrayKey": [...]} with each call
+     * opening a new item object. Items are closed by {@link #endArrayItemSection()}.
+     *
+     * <p>Default delegates to {@link #startSection(String)} so that STANDARD
+     * writers and test stubs do not need to override it.
+     *
+     * @param arrayKey JSON key under which the array is written
+     */
+    default void startArrayItemSection(String arrayKey) {
+        startSection(arrayKey);
+    }
+
+    /**
+     * Ends the current array item object started by {@link #startArrayItemSection}.
+     * Default delegates to {@link #endSection()}.
+     */
+    default void endArrayItemSection() {
+        endSection();
+    }
+
     void writeSectionKeyValue(String sectionName, long timeMillis, String key, long value);
 
     void writeSectionKeyValue(String sectionName, long timeMillis, String key, double value);

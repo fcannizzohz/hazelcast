@@ -26,6 +26,9 @@ import org.junit.runner.RunWith;
 
 import java.io.CharArrayWriter;
 import java.io.PrintWriter;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 
@@ -100,7 +103,7 @@ public class DiagnosticsLogConverterTest extends HazelcastTestSupport {
     }
 
     @Test
-    public void testParseStandard_withoutEpoch_epochIsNull() {
+    public void testParseStandard_withoutEpoch_epochDerivedFromTime() {
         String standard = "19-03-2026 01:45:12 NoEpochSection[" + System.lineSeparator()
                 + "                          key=value" + System.lineSeparator()
                 + "]" + System.lineSeparator();
@@ -109,7 +112,13 @@ public class DiagnosticsLogConverterTest extends HazelcastTestSupport {
         assertNotNull(entry);
         assertEquals("19-03-2026 01:45:12", entry.getTime());
         assertEquals("NoEpochSection", entry.getName());
-        assertNull("epoch must be null when absent from the STANDARD header", entry.getEpoch());
+
+        long expectedEpoch = LocalDateTime.parse("19-03-2026 01:45:12",
+                DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm:ss"))
+                .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        assertNotNull("epoch must be derived when absent from the STANDARD header", entry.getEpoch());
+        assertEquals("derived epoch must match time string", expectedEpoch, (long) entry.getEpoch());
+        assertEquals("derived epoch must have millis=000", 0L, entry.getEpoch() % 1000);
         assertEquals("value", entry.getContent().get("key"));
     }
 
@@ -525,6 +534,8 @@ public class DiagnosticsLogConverterTest extends HazelcastTestSupport {
         String json = converter.toJson(entry);
         assertNotNull(json);
         assertTrue(json.contains("\"nestedKey\":1234567"));
+        // plain string entries must be wrapped as {"text":"..."}
+        assertTrue(json.contains("\"entries\":[{\"text\":\"simple entry with \\n newline\"}]"));
     }
 
     @Test
@@ -578,7 +589,8 @@ public class DiagnosticsLogConverterTest extends HazelcastTestSupport {
         String json = converter.toJson(entry);
         assertNotNull(json);
         assertTrue(json.contains("\"startedAt\":[1000,2000]"));
-        assertTrue(json.contains("\"entries\":[\"line1\",\"line2\"]"));
+        // plain string entries are wrapped as {"text":"..."} objects
+        assertTrue(json.contains("\"entries\":[{\"text\":\"line1\"},{\"text\":\"line2\"}]"));
     }
 
     // -----------------------------------------------------------------------
@@ -586,13 +598,16 @@ public class DiagnosticsLogConverterTest extends HazelcastTestSupport {
     // -----------------------------------------------------------------------
 
     @Test
-    public void testToJson_withNullEpoch_omitsEpochField() {
+    public void testToJson_noEpochInStandard_epochDerivedAndEmitted() {
+        // parseViaWriter uses DiagnosticsLogWriterImpl without epoch, so the STANDARD output
+        // has no epoch in the header. parseStandard must derive it from the time field.
         DiagnosticsLogConverter.DiagnosticEntry entry = parseViaWriter(w -> {
             w.writeKeyValueEntry("k", "v");
         });
-        assertNull(entry.getEpoch());
+        assertNotNull("epoch must be derived from time when absent from STANDARD header", entry.getEpoch());
+        assertEquals("derived epoch must have millis=000", 0L, entry.getEpoch() % 1000);
         String json = converter.toJson(entry);
-        assertFalse("epoch field must be absent when null", json.contains("\"epoch\""));
+        assertTrue("epoch must be present in JSON output", json.contains("\"epoch\":"));
         assertTrue(json.contains("\"k\":\"v\""));
     }
 
@@ -705,13 +720,16 @@ public class DiagnosticsLogConverterTest extends HazelcastTestSupport {
     }
 
     @Test
-    public void testToJson_entriesList_rendersAsJsonArray() {
+    public void testToJson_entriesList_rendersAsJsonArrayOfObjects() {
         DiagnosticsLogConverter.DiagnosticEntry entry = parseViaWriter(w -> {
             w.writeEntry("alpha");
             w.writeEntry("beta");
         });
         String json = converter.toJson(entry);
-        assertTrue("entries list must be a JSON array", json.contains("\"entries\":[\"alpha\",\"beta\"]"));
+        // plain string entries must be wrapped as {"text":"..."} objects
+        assertTrue("entries list must be a JSON array of objects",
+                json.contains("\"entries\":[{\"text\":\"alpha\"},{\"text\":\"beta\"}]"));
+        assertFalse(json.contains("\"entries\":[\"alpha\""));
     }
 
     // -----------------------------------------------------------------------

@@ -66,7 +66,7 @@ public class DiagnosticsLogWriterJsonImplTest extends HazelcastTestSupport {
         writer.endSection();
         writer.writeKeyValueEntry("string", "foo");
         writer.writeKeyValueEntry("double", 11.5d);
-        // single entry — must produce a one-element JSON array, not a plain string
+        // single entry — must produce a one-element JSON array of objects
         writer.writeEntry("foobar");
         writer.endSection();
 
@@ -77,9 +77,10 @@ public class DiagnosticsLogWriterJsonImplTest extends HazelcastTestSupport {
         assertTrue(actual.contains("\"SubSection\":{\"integer\":10}"));
         assertTrue(actual.contains("\"string\":\"foo\""));
         assertTrue(actual.contains("\"double\":11.5"));
-        assertTrue(actual.contains("\"entries\":[\"foobar\"]"));
-        // must not produce the old bare-string form
+        // entries items are always objects — plain strings wrapped as {"text":"..."}
+        assertTrue(actual.contains("\"entries\":[{\"text\":\"foobar\"}]"));
         assertFalse(actual.contains("\"entries\":\"foobar\""));
+        assertFalse(actual.contains("\"entries\":[\"foobar\"]"));
     }
 
     @Test
@@ -92,8 +93,23 @@ public class DiagnosticsLogWriterJsonImplTest extends HazelcastTestSupport {
         assertTrue(actual.contains("\"value with \\\"quotes\\\" and \\\\backslashes\\nand newlines\""));
     }
 
+    // --- Change 1: epoch always present in JSON ---
+
     @Test
-    public void testEpochTime() {
+    public void epochAlwaysPresent_whenIncludeEpochTimeFalse() {
+        // Even with includeEpochTime=false the JSON writer must always emit epoch
+        writer = new DiagnosticsLogWriterJsonImpl(false, null);
+        writer.init(new PrintWriter(out));
+        writer.startSection("Section", 123456789L);
+        writer.endSection();
+
+        String actual = out.toString();
+        assertTrue("epoch must be present even when includeEpochTime=false",
+                actual.contains("\"epoch\":123456789"));
+    }
+
+    @Test
+    public void epochAlwaysPresent_whenIncludeEpochTimeTrue() {
         writer = new DiagnosticsLogWriterJsonImpl(true, null);
         writer.init(new PrintWriter(out));
         writer.startSection("Section", 123456789L);
@@ -138,10 +154,10 @@ public class DiagnosticsLogWriterJsonImplTest extends HazelcastTestSupport {
         writer.endSection();
 
         String actual = out.toString();
-        // object entry followed by string entry in the same array
+        // structured object followed by plain-text object in the same array
         assertTrue(actual.contains(
                 "\"entries\":[{\"exceptionClass\":\"java.lang.NullPointerException\",\"message\":\"oops\"},"
-                + "\"at com.hazelcast.Foo.bar(Foo.java:10)\"]"));
+                + "{\"text\":\"at com.hazelcast.Foo.bar(Foo.java:10)\"}]"));
     }
 
     @Test
@@ -182,14 +198,21 @@ public class DiagnosticsLogWriterJsonImplTest extends HazelcastTestSupport {
         assertEquals(DiagnosticsLogFormat.JSON, writer.getFormat());
     }
 
-    // --- writeEntry bug-fix tests ---
+    // --- writeEntry tests (Change 2: items always objects) ---
 
-    /**
-     * Multiple writeEntry calls in the same section must produce a single
-     * "entries" JSON array, not duplicate keys.
-     */
     @Test
-    public void writeEntry_multipleCallsProduceSingleArray() {
+    public void writeEntry_producesTextWrappedObject() {
+        writer.startSection("Section");
+        writer.writeEntry("foobar");
+        writer.endSection();
+
+        String actual = out.toString();
+        assertTrue(actual.contains("\"entries\":[{\"text\":\"foobar\"}]"));
+        assertFalse(actual.contains("\"entries\":[\"foobar\"]"));
+    }
+
+    @Test
+    public void writeEntry_multipleCallsProduceSingleArrayOfObjects() {
         writer.startSection("Section");
         writer.writeEntry("first");
         writer.writeEntry("second");
@@ -197,17 +220,13 @@ public class DiagnosticsLogWriterJsonImplTest extends HazelcastTestSupport {
         writer.endSection();
 
         String actual = out.toString();
-        assertTrue(actual.contains("\"entries\":[\"first\",\"second\",\"third\"]"));
+        assertTrue(actual.contains(
+                "\"entries\":[{\"text\":\"first\"},{\"text\":\"second\"},{\"text\":\"third\"}]"));
         // no duplicate keys
         int firstIdx = actual.indexOf("\"entries\"");
-        int secondIdx = actual.indexOf("\"entries\"", firstIdx + 1);
-        assertTrue("duplicate 'entries' key found", secondIdx == -1);
+        assertTrue("duplicate 'entries' key found", actual.indexOf("\"entries\"", firstIdx + 1) == -1);
     }
 
-    /**
-     * A writeKeyValueEntry after writeEntry must close the array first,
-     * producing valid JSON (models the ConnectionAdded section pattern).
-     */
     @Test
     public void writeEntry_followedByKeyValue_closesArrayFirst() {
         writer.startSection("ConnectionAdded");
@@ -217,13 +236,9 @@ public class DiagnosticsLogWriterJsonImplTest extends HazelcastTestSupport {
         writer.endSection();
 
         String actual = out.toString();
-        // entry array must be closed before the next key
-        assertTrue(actual.contains("\"entries\":[\"connection-info\"],\"type\":\"MEMBER\",\"isAlive\":true"));
+        assertTrue(actual.contains("\"entries\":[{\"text\":\"connection-info\"}],\"type\":\"MEMBER\",\"isAlive\":true"));
     }
 
-    /**
-     * A nested startSection after writeEntry must close the array first.
-     */
     @Test
     public void writeEntry_followedByNestedSection_closesArrayFirst() {
         writer.startSection("Outer");
@@ -234,12 +249,9 @@ public class DiagnosticsLogWriterJsonImplTest extends HazelcastTestSupport {
         writer.endSection();
 
         String actual = out.toString();
-        assertTrue(actual.contains("\"entries\":[\"outer-entry\"],\"Inner\":{\"k\":\"v\"}"));
+        assertTrue(actual.contains("\"entries\":[{\"text\":\"outer-entry\"}],\"Inner\":{\"k\":\"v\"}"));
     }
 
-    /**
-     * writeEntry with escaping characters must still produce a valid array.
-     */
     @Test
     public void writeEntry_escapingInsideArray() {
         writer.startSection("Section");
@@ -247,7 +259,7 @@ public class DiagnosticsLogWriterJsonImplTest extends HazelcastTestSupport {
         writer.endSection();
 
         String actual = out.toString();
-        assertTrue(actual.contains("\"entries\":[\"line with \\\"quotes\\\" and\\nnewline\"]"));
+        assertTrue(actual.contains("\"entries\":[{\"text\":\"line with \\\"quotes\\\" and\\nnewline\"}]"));
     }
 
     // --- writeKeyValueEntryAsDateTime ---
@@ -259,7 +271,6 @@ public class DiagnosticsLogWriterJsonImplTest extends HazelcastTestSupport {
         writer.endSection();
 
         String actual = out.toString();
-        // value must be a quoted string, not a raw number
         assertFalse("datetime value must not be a bare number", actual.contains("\"startedAt\":1710812712000"));
         assertTrue("datetime value must be a quoted string", actual.contains("\"startedAt\":\""));
     }
@@ -305,7 +316,6 @@ public class DiagnosticsLogWriterJsonImplTest extends HazelcastTestSupport {
 
     @Test
     public void startSection_beyondMaxDepth_doesNotThrowArrayIndexException() {
-        // Nest beyond the limit of MAX_SECTION_LEVELS (8)
         for (int i = 0; i < 9; i++) {
             writer.startSection("Level" + i);
         }
@@ -313,14 +323,89 @@ public class DiagnosticsLogWriterJsonImplTest extends HazelcastTestSupport {
         for (int i = 0; i < 9; i++) {
             writer.endSection();
         }
-        // A root-level JSON line must still have been produced
         assertTrue("output must contain a JSON object line", out.toString().contains("{"));
     }
 
     @Test
     public void endSection_withoutMatchingStart_doesNotThrowUnderflowException() {
-        // Should not throw — just trigger the underflow warning path
         writer.endSection();
-        // No exception means the guard worked
+    }
+
+    // --- startArrayItemSection / endArrayItemSection (Change 5) ---
+
+    @Test
+    public void startArrayItemSection_singleItem_producesNamedArray() {
+        writer.startSection("OverloadedConnections");
+        writer.startArrayItemSection("connection");
+        writer.writeKeyValueEntry("from", "127.0.0.1:5701");
+        writer.writeKeyValueEntry("to", "127.0.0.1:5702");
+        writer.endArrayItemSection();
+        writer.endSection();
+
+        String actual = out.toString();
+        assertTrue(actual.contains("\"connection\":[{\"from\":\"127.0.0.1:5701\",\"to\":\"127.0.0.1:5702\"}]"));
+    }
+
+    @Test
+    public void startArrayItemSection_multipleItems_allInSameArray() {
+        writer.startSection("OverloadedConnections");
+        writer.startArrayItemSection("connection");
+        writer.writeKeyValueEntry("from", "addr1");
+        writer.writeKeyValueEntry("packetCount", 100L);
+        writer.endArrayItemSection();
+        writer.startArrayItemSection("connection");
+        writer.writeKeyValueEntry("from", "addr2");
+        writer.writeKeyValueEntry("urgentPacketCount", 50L);
+        writer.endArrayItemSection();
+        writer.endSection();
+
+        String actual = out.toString();
+        assertTrue(actual.contains("\"connection\":["));
+        assertTrue(actual.contains("{\"from\":\"addr1\",\"packetCount\":100}"));
+        assertTrue(actual.contains("{\"from\":\"addr2\",\"urgentPacketCount\":50}"));
+        // only one "connection" key
+        int first = actual.indexOf("\"connection\"");
+        assertTrue(actual.indexOf("\"connection\"", first + 1) == -1);
+    }
+
+    @Test
+    public void startArrayItemSection_withNestedSection_fullyNested() {
+        writer.startSection("Root");
+        writer.startArrayItemSection("connection");
+        writer.writeKeyValueEntry("from", "addr1");
+        writer.startSection("samples");
+        writer.writeStructuredEntry("type", "PutOp", "count", 5L);
+        writer.endSection();
+        writer.endArrayItemSection();
+        writer.endSection();
+
+        String actual = out.toString();
+        assertTrue(actual.contains("\"connection\":[{\"from\":\"addr1\",\"samples\":{\"entries\":[{\"type\":\"PutOp\",\"count\":5}]}}]"));
+    }
+
+    @Test
+    public void startArrayItemSection_arrayClosedWhenParentSectionEnds() {
+        writer.startSection("Root");
+        writer.startArrayItemSection("items");
+        writer.writeKeyValueEntry("k", "v");
+        writer.endArrayItemSection();
+        writer.endSection();
+
+        String actual = out.toString();
+        // the array must be closed before the outer }
+        assertTrue(actual.contains("\"items\":[{\"k\":\"v\"}]}"));
+    }
+
+    @Test
+    public void startArrayItemSection_keyValueBeforeArray_separatedByComma() {
+        writer.startSection("Root");
+        writer.writeKeyValueEntry("before", "val");
+        writer.startArrayItemSection("items");
+        writer.writeKeyValueEntry("k", "v");
+        writer.endArrayItemSection();
+        writer.endSection();
+
+        String actual = out.toString();
+        assertTrue(actual.contains("\"before\":\"val\",\"items\":[{\"k\":\"v\"}]"));
     }
 }

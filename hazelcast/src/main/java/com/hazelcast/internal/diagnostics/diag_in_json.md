@@ -2,12 +2,11 @@
 
 ## Overview
 
-Hazelcast diagnostics can now emit log entries in JSON format in addition to the
+Hazelcast diagnostics can emit log entries in JSON format in addition to the
 existing STANDARD (human-readable text) format. Each plugin execution produces a
-**single line of JSON**, which makes the output directly consumable by log
-aggregators (e.g. Filebeat → Elasticsearch, Splunk, Loki).
-
-Introduced in: **5.6** (commit `78f5283deeb`)
+**single newline-terminated JSON object** on its own line, making the output
+directly consumable by log aggregators such as Loki, Filebeat → Elasticsearch,
+or Splunk.
 
 ---
 
@@ -31,50 +30,927 @@ Allowed values: `STANDARD` (default), `JSON`.
 
 ---
 
-## Output format
+## Parsing guide
 
-Every plugin execution produces exactly **one newline-terminated JSON object**:
+### Line format
 
+Each line is an independent, self-contained JSON object — **one object per
+line**, no wrapping array, no commas between lines. Parsers must process the
+file line-by-line (NDJSON style).
+
+### Envelope schema
+
+```typescript
+interface DiagnosticsLine {
+  time:   string;   // always present; format: "dd-MM-yyyy HH:mm:ss" in JVM system timezone
+  epoch:  number;   // always present in JSON writer output (milliseconds since Unix epoch);
+                    // absent only in DiagnosticsLogConverter output when source STANDARD had no epoch
+  name:   string;   // message-type discriminator; see table below
+  content: object;  // plugin-specific payload; always an object, never null
+}
 ```
-{"time":"<dd-MM-yyyy HH:mm:ss>","epoch":<millis>,"name":"<plugin>","content":{...}}
-```
 
-| Field     | Type   | Description                                       |
-|-----------|--------|---------------------------------------------------|
-| `time`    | string | Wall-clock timestamp (system default timezone)    |
-| `epoch`   | number | Unix epoch in milliseconds (omitted when `includeEpochTime=false`) |
-| `name`    | string | Diagnostics plugin name                           |
-| `content` | object | Plugin-specific key-value data (nested as needed) |
+**`time` format:** `DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm:ss")` in
+`ZoneId.systemDefault()`. This is **day-first, not ISO 8601**. A timestamp such
+as `"19-03-2026 14:05:00"` means 19 March 2026 14:05:00 in the JVM's local
+timezone. Parsers that need UTC must also consume `epoch`.
 
-### Example — flat key-value
+**`epoch` presence:** The JSON writer always emits `epoch` regardless of the
+`includeEpochTime` setting (which only controls the STANDARD format). The only
+case where `epoch` may be absent is when `DiagnosticsLogConverter` converts a
+STANDARD log that was originally written without epoch.
+
+### `name` discriminator table
+
+Every JSON line carries a `name` field that identifies its content schema.
+
+| `name` value | Source plugin | Content schema (section below) |
+|---|---|---|
+| `"BuildInfo"` | `BuildInfoPlugin` | [BuildInfo](#buildinfoplugin) |
+| `"ConfigProperties"` | `ConfigPropertiesPlugin` | [ConfigProperties](#configpropertiesplugin) |
+| `"SystemProperties"` | `SystemPropertiesPlugin` | [SystemProperties](#systempropertiesplugin) |
+| `"Metric"` | `MetricsPlugin` | [Metric](#metricsplugin) |
+| `"EventQueues"` | `EventQueuePlugin` | [EventQueues](#eventqueueplugin) |
+| `"PendingInvocations"` | `PendingInvocationsPlugin` | [PendingInvocations](#pendinginvocationsplugin) |
+| `"SlowOperations"` | `SlowOperationPlugin` | [SlowOperations](#slowoperationplugin) |
+| `"Lifecycle"` | `SystemLogPlugin` | [Lifecycle](#lifecycle) |
+| `"MemberAdded"` | `SystemLogPlugin` | [MemberAdded/Removed](#memberadded--memberremoved) |
+| `"MemberRemoved"` | `SystemLogPlugin` | [MemberAdded/Removed](#memberadded--memberremoved) |
+| `"ConnectionAdded"` | `SystemLogPlugin` | [ConnectionAdded/Removed](#connectionadded--connectionremoved) |
+| `"ConnectionRemoved"` | `SystemLogPlugin` | [ConnectionAdded/Removed](#connectionadded--connectionremoved) |
+| `"ClusterVersionChanged"` | `SystemLogPlugin` | [ClusterVersionChanged](#clusterversionchanged) |
+| `"MigrationState"` | `SystemLogPlugin` | [MigrationState](#migrationstate) |
+| `"MigrationCompleted"` | `SystemLogPlugin` | [MigrationCompleted/Failed](#migrationcompleted--migrationfailed) |
+| `"MigrationFailed"` | `SystemLogPlugin` | [MigrationCompleted/Failed](#migrationcompleted--migrationfailed) |
+| `"OperationHeartbeat"` | `OperationHeartbeatPlugin` | [OperationHeartbeat](#operationheartbeatplugin) |
+| `"MemberHeartbeats"` | `MemberHeartbeatPlugin` | [MemberHeartbeats](#memberheartbeatplugin) |
+| `"NetworkingImbalance"` | `NetworkingImbalancePlugin` | [NetworkingImbalance](#networkingimbalanceplugin) |
+| `"OverloadedConnections"` | `OverloadedConnectionsPlugin` | [OverloadedConnections](#overloadedconnectionsplugin) |
+| `"OperationsProfiler"` | `OperationProfilerPlugin` | [OperationsProfiler](#operationprofilerplugin) |
+| `"InvocationProfiler"` | `InvocationProfilerPlugin` | [InvocationProfiler](#invocationprofilerplugin) |
+| `"OperationThreadSamples"` | `OperationThreadSamplerPlugin` | [OperationThreadSamples](#operationthreadsamplereplugin) |
+| `"HazelcastInstance"` | `MemberHazelcastInstanceInfoPlugin` | [HazelcastInstance](#memberhazelcastinstanceinfoplugin) |
+| `"Invocations"` | `InvocationSamplePlugin` | [Invocations](#invocationsampleplugin) |
+| *(any other string)* | `StoreLatencyPlugin` | [StoreLatency](#storelatencyplugin) |
+
+> **`StoreLatencyPlugin` caveat:** `StoreLatencyPlugin` sets `name` to the
+> service name (e.g. `"MapService"`, `"CacheService"`). These service names are
+> not reserved and not in the table above. Parsers should treat any `name` value
+> that does not appear in the table as a potential `StoreLatencyPlugin` line.
+
+### Emission semantics (when a line is produced)
+
+Not every plugin run produces a JSON line. A line is emitted **only when the
+plugin calls `startSection`/`endSection`**. Plugins that use lazy (on-demand)
+sections suppress output entirely when there is nothing to report:
+
+| Behaviour | Plugins |
+|---|---|
+| **Always emits** one or more lines per run | `BuildInfoPlugin` (run-once), `ConfigPropertiesPlugin` (run-once), `SystemPropertiesPlugin` (run-once), `MetricsPlugin` (one line per metric), `PendingInvocationsPlugin`, `SlowOperationPlugin`, `OperationProfilerPlugin`, `InvocationProfilerPlugin`, `OperationThreadSamplerPlugin`, `MemberHazelcastInstanceInfoPlugin`, `InvocationSamplePlugin` |
+| **Emits one line per event** (event-driven) | `SystemLogPlugin` |
+| **Emits per service** (one line per service with data) | `StoreLatencyPlugin` |
+| **Suppresses output** when nothing to report | `OperationHeartbeatPlugin`, `MemberHeartbeatPlugin`, `EventQueuePlugin` (below threshold), `OverloadedConnectionsPlugin` (below threshold), `NetworkingImbalancePlugin` |
+
+### `entries` array semantics
+
+The `"entries"` key appears inside a section when the plugin calls
+`writeEntry(String)` or `writeStructuredEntry(Object... kvPairs)`:
+
+- **Present** only when at least one such call was made in that section.
+- **Absent** (the key does not exist, not `null`, not `[]`) when no such calls
+  were made.
+- **Always an array** when present — even if only one item was written.
+- **Always objects**: every item in the array is a JSON object.
+  - `writeEntry(String)` produces `{"text": "<escaped value>"}`.
+  - `writeStructuredEntry(kvPairs)` produces an object with plugin-defined keys.
 
 ```json
-{"time":"19-03-2026 12:00:00","epoch":1710849600000,"name":"SystemProperties","content":{"java.version":"21.0.2","os.name":"Linux"}}
+{"entries":[{"text":"plain text"},{"key":"value"},{"text":"another plain text"}]}
 ```
 
-### Example — nested sections
+> **Output is compact JSON** — no spaces between tokens in the actual output.
+> Examples in this document use spaces/newlines only for human readability.
 
-```json
-{"time":"...","name":"OperationsProfiler","content":{"java.lang.String":{"count":5,"totalTime(us)":120,"avg(us)":24,"max(us)":80,"latency-distribution":{"16..31us":3,"64..127us":2}}}}
+### Absent vs null
+
+Fields that may be conditionally absent are **absent** (the key is not emitted),
+never JSON `null`. Examples:
+- `"CloseCause"` in a `ConnectionRemoved` line is absent when the connection has
+  no cause exception.
+- `"UpstreamRevision"` in `BuildInfo` is absent when the build has no upstream.
+
+The only value emitted as JSON `null` is when a Java `null` is passed to
+`writeStructuredEntry` (e.g. `operationDetails` in `slowInvocations` if the
+operation details string is null).
+
+### Numeric types
+
+| Java type | JSON encoding |
+|---|---|
+| `long` / `int` | integer (no decimal point, no quotes) |
+| `double` / `float` | number (may include decimal point; `NaN` is written as the token `NaN`) |
+| `boolean` | `true` / `false` (no quotes) |
+| `String` | double-quoted, JSON-escaped |
+
+---
+
+## Per-plugin JSON content schemas
+
+> Type notation:
+> - `field: T` — required, always present
+> - `field?: T` — optional, absent when not applicable
+> - `[key: string]: T` — **dynamic key** (the key name is data, not fixed)
+> - `(A | B)[]` — mixed-type array
+> - `"literal"` — a fixed string constant
+
+---
+
+### BuildInfoPlugin
+
+**`name`:** `"BuildInfo"` | run-once
+
+```typescript
+interface BuildInfoContent {
+  Build:              string;
+  BuildNumber:        number;   // long; written as string in STANDARD to suppress comma-grouping
+  Revision:           string;
+  UpstreamRevision?:  string;   // absent when no upstream build
+  Version:            string;
+  SerialVersion:      string;
+  Enterprise:         boolean;
+}
 ```
 
-### The `"entries"` array
+```json
+{"time":"19-03-2026 12:00:00","name":"BuildInfo","content":{
+  "Build":"20260319",
+  "BuildNumber":20260319,
+  "Revision":"abc1234",
+  "Version":"5.6.0",
+  "SerialVersion":"1",
+  "Enterprise":false
+}}
+```
 
-The reserved key `"entries"` collects all unkeyed values written by a plugin via
-`writeEntry()` (plain text) and `writeStructuredEntry()` (structured object).
-Both types share the same array so their order is preserved.
+---
 
-- Always a JSON array, even when only one item was written.
-- Items are either a `string` (plain text) or an `object` (structured entry with named fields).
-- Omitted entirely when neither method is called in a section.
+### ConfigPropertiesPlugin
+
+**`name`:** `"ConfigProperties"` | run-once
+
+```typescript
+interface ConfigPropertiesContent {
+  [propertyName: string]: string;   // all values are strings
+}
+```
 
 ```json
-{"time":"...","name":"SomePlugin","content":{"entries":["plain text"]}}
-{"time":"...","name":"SomePlugin","content":{"entries":[{"operation":"PutOp","samples":4}]}}
-{"time":"...","name":"SomePlugin","content":{"entries":[
-  {"operation":"PutOp","samples":4},
-  "max number of invocations to print reached."
-]}}
+{"time":"19-03-2026 12:00:00","name":"ConfigProperties","content":{
+  "hazelcast.operation.call.timeout.millis":"60000",
+  "hazelcast.slow.operation.detector.enabled":"true"
+}}
+```
+
+---
+
+### SystemPropertiesPlugin
+
+**`name`:** `"SystemProperties"` | run-once
+
+```typescript
+interface SystemPropertiesContent {
+  [systemPropertyName: string]: string;   // all values are strings
+}
+```
+
+```json
+{"time":"19-03-2026 12:00:00","name":"SystemProperties","content":{
+  "java.version":"21.0.2",
+  "os.name":"Linux",
+  "user.timezone":"UTC"
+}}
+```
+
+---
+
+### MetricsPlugin
+
+**`name`:** `"Metric"` | periodic | **one JSON line per metric**
+
+Each call to `metricsRegistry.collect()` produces an independent JSON line.
+The entire `content` object contains exactly **one key**: the metric name in
+parsed form.
+
+**Metric key format:** `[prefix.]metric[discriminator=value][tag=value](unit)`
+where the discriminator/tag and unit parts are omitted when not present.
+Unit names are lower-cased (e.g. `bytes`, `ms`, `ns`, `percent`).
+
+```typescript
+interface MetricContent {
+  [parsedMetricKey: string]: number | string;
+  // number when collectLong/collectDouble; string when collectException/collectNoValue
+  // key examples: "jvm.memory.heap.used(bytes)", "map.size[instance=myMap]", "os.cpu.load"
+}
+```
+
+```json
+{"time":"19-03-2026 12:00:00","epoch":1710849600000,"name":"Metric","content":{"jvm.memory.heap.used(bytes)":1048576}}
+{"time":"19-03-2026 12:00:00","epoch":1710849600000,"name":"Metric","content":{"jvm.memory.heap.used(percent)":68.4}}
+{"time":"19-03-2026 12:00:00","epoch":1710849600000,"name":"Metric","content":{"os.cpu.load":"NA"}}
+{"time":"19-03-2026 12:00:00","epoch":1710849600000,"name":"Metric","content":{"map.size[instance=myMap]":42}}
+```
+
+> **Parser note:** All lines in a single metrics collection share the same
+> `epoch` value (set once before `metricsRegistry.collect()` is called).
+
+> **STANDARD vs JSON difference:** STANDARD uses the raw `[metric=...,unit=...]`
+> bracket notation. JSON uses the human-readable parsed form above.
+
+---
+
+### EventQueuePlugin
+
+**`name`:** `"EventQueues"` | periodic | suppressed when all queues are below threshold
+
+```typescript
+interface EventQueuesContent {
+  [workerKey: string]: WorkerSection;   // key is "worker=<N>" (1-based index)
+}
+
+interface WorkerSection {
+  eventCount:   number;    // total events in the queue at sample time
+  sampleCount:  number;    // number of events actually sampled
+  samples: {
+    entries?: SampleEntry[];
+  };
+}
+
+interface SampleEntry {
+  eventType:   string;   // e.g. "IMap 'employees' UPDATED", "ICache 'myCache' CREATED"
+  sampleCount: number;
+  percentage:  number;   // fraction 0.0–1.0 (not 0–100)
+}
+```
+
+```json
+{"time":"19-03-2026 12:00:00","name":"EventQueues","content":{
+  "worker=1": {
+    "eventCount": 1500,
+    "sampleCount": 100,
+    "samples": {
+      "entries": [
+        { "eventType": "IMap 'employees' UPDATED", "sampleCount": 72, "percentage": 0.72 },
+        { "eventType": "IMap 'orders' ADDED",      "sampleCount": 28, "percentage": 0.28 }
+      ]
+    }
+  }
+}}
+```
+
+---
+
+### PendingInvocationsPlugin
+
+**`name`:** `"PendingInvocations"` | periodic
+
+```typescript
+interface PendingInvocationsContent {
+  count: number;   // total size of InvocationRegistry
+  invocations: {
+    entries?: InvocationEntry[];   // absent when registry is empty or all below threshold
+  };
+}
+
+interface InvocationEntry {
+  operation: string;   // fully-qualified operation class name
+  count:     number;
+}
+```
+
+```json
+{"time":"19-03-2026 12:00:00","name":"PendingInvocations","content":{
+  "count": 3,
+  "invocations": {
+    "entries": [
+      { "operation": "com.hazelcast.map.impl.operation.PutOperation", "count": 2 },
+      { "operation": "com.hazelcast.map.impl.operation.GetOperation", "count": 1 }
+    ]
+  }
+}}
+```
+
+---
+
+### SlowOperationPlugin
+
+**`name`:** `"SlowOperations"` | periodic
+
+```typescript
+interface SlowOperationsContent {
+  [operationClassName: string]: SlowOperationEntry;   // dynamic: fully-qualified class name
+}
+
+interface SlowOperationEntry {
+  invocations: number;
+  stackTrace: {
+    entries?: StackLineEntry[];
+  };
+  slowInvocations: {
+    entries?: InvocationEntry[];
+  };
+}
+
+interface StackLineEntry {
+  line: string;   // one stack frame, e.g. "at com.example.MyOp.run(MyOp.java:42)"
+}
+
+interface InvocationEntry {
+  startedAt:        number;           // epoch ms when invocation began
+  "duration(ms)":   number;
+  operationDetails: string | null;    // null when no details available
+}
+```
+
+```json
+{"time":"19-03-2026 12:00:00","name":"SlowOperations","content":{
+  "com.hazelcast.map.impl.operation.PutOperation": {
+    "invocations": 2,
+    "stackTrace": {
+      "entries": [
+        { "line": "at com.hazelcast.map.impl.operation.PutOperation.run(PutOperation.java:99)" },
+        { "line": "at com.hazelcast.spi.impl.operationexecutor.impl.OperationThread.run(OperationThread.java:176)" }
+      ]
+    },
+    "slowInvocations": {
+      "entries": [
+        { "startedAt": 1710849540000, "duration(ms)": 8200, "operationDetails": "PutOperation{...}" }
+      ]
+    }
+  }
+}}
+```
+
+> **STANDARD vs JSON difference:** STANDARD also writes `started(date-time)` (a
+> formatted string) per invocation. JSON omits it; `startedAt` (epoch ms) is
+> sufficient.
+
+---
+
+### SystemLogPlugin
+
+This plugin emits **one JSON line per cluster event**, not one per plugin run.
+The `name` field is the event type. Events are captured by listeners and
+flushed on each 1-second scheduler tick.
+
+#### Lifecycle
+
+**`name`:** `"Lifecycle"`
+
+```typescript
+interface LifecycleContent {
+  entries: [LifecycleEntry];   // always exactly one entry per line
+}
+interface LifecycleEntry {
+  state: "STARTING" | "STARTED" | "SHUTTING_DOWN" | "SHUTDOWN"
+       | "MERGING" | "MERGED" | "CLIENT_CONNECTED" | "CLIENT_DISCONNECTED";
+}
+```
+
+```json
+{"time":"19-03-2026 12:00:00","name":"Lifecycle","content":{"entries":[{"state":"STARTED"}]}}
+```
+
+#### MemberAdded / MemberRemoved
+
+**`name`:** `"MemberAdded"` | `"MemberRemoved"`
+
+```typescript
+interface MembershipContent {
+  member: string;   // address of the changed member, e.g. "192.168.1.10:5701"
+  Members: {
+    entries?: MemberEntry[];   // current member list after the event
+  };
+}
+interface MemberEntry {
+  address:  string;    // e.g. "192.168.1.10:5701"
+  isThis:   boolean;   // true when this is the local member
+  isMaster: boolean;   // true for the first member in the member list (oldest member)
+}
+```
+
+```json
+{"time":"19-03-2026 12:00:00","name":"MemberAdded","content":{
+  "member": "192.168.1.11:5701",
+  "Members": {
+    "entries": [
+      { "address": "192.168.1.10:5701", "isThis": true,  "isMaster": true  },
+      { "address": "192.168.1.11:5701", "isThis": false, "isMaster": false }
+    ]
+  }
+}}
+```
+
+#### ConnectionAdded / ConnectionRemoved
+
+**`name`:** `"ConnectionAdded"` | `"ConnectionRemoved"`
+
+```typescript
+interface ConnectionContent {
+  entries: [ConnectionEntry];   // always exactly one entry per line
+  type?:        string;         // connection type (e.g. "MEMBER"); absent for non-ServerConnection
+  isAlive:      boolean;
+  closeReason?: string;         // present only for ConnectionRemoved
+  CloseCause?:  CloseCauseSection;  // present only when connection has a cause exception
+}
+interface ConnectionEntry {
+  connection: string;   // connection.toString()
+}
+interface CloseCauseSection {
+  entries: (ExceptionEntry | TextEntry)[];
+  // first item is always an ExceptionEntry object;
+  // subsequent items are stack-frame strings wrapped as TextEntry
+}
+interface TextEntry {
+  text: string;   // plain string from writeEntry(), e.g. a stack frame line
+}
+interface ExceptionEntry {
+  exceptionClass: string;
+  message:        string | null;
+}
+```
+
+```json
+{"time":"19-03-2026 12:00:00","epoch":1710849600000,"name":"ConnectionRemoved","content":{"entries":[{"connection":"Connection[192.168.1.11:5701->192.168.1.10:5701]"}],"type":"MEMBER","isAlive":false,"closeReason":"Connection closed by peer","CloseCause":{"entries":[{"exceptionClass":"java.io.EOFException","message":"Connection reset"},{"text":"at java.io.DataInputStream.readFully(DataInputStream.java:197)"},{"text":"at com.hazelcast.internal.nio.IOUtil.readFully(IOUtil.java:88)"}]}}}
+```
+
+#### ClusterVersionChanged
+
+**`name`:** `"ClusterVersionChanged"`
+
+```typescript
+interface ClusterVersionContent {
+  entries: [VersionEntry];
+}
+interface VersionEntry {
+  version: string;   // e.g. "5.6"
+}
+```
+
+```json
+{"time":"19-03-2026 12:00:00","name":"ClusterVersionChanged","content":{"entries":[{"version":"5.6"}]}}
+```
+
+#### MigrationState
+
+**`name`:** `"MigrationState"`
+
+```typescript
+interface MigrationStateContent {
+  startTime:            string;   // "dd-MM-yyyy HH:mm:ss" string in BOTH STANDARD and JSON
+  plannedMigrations:    number;
+  completedMigrations:  number;
+  remainingMigrations:  number;
+  "totalElapsedTime(ms)": number;
+}
+```
+
+```json
+{"time":"19-03-2026 12:00:00","name":"MigrationState","content":{
+  "startTime": "19-03-2026 12:00:00",
+  "plannedMigrations": 271,
+  "completedMigrations": 10,
+  "remainingMigrations": 261,
+  "totalElapsedTime(ms)": 3200
+}}
+```
+
+> **`startTime` is a formatted string, not epoch ms**, in both formats.
+> `MigrationState.getStartTime()` does not expose an epoch value.
+
+#### MigrationCompleted / MigrationFailed
+
+**`name`:** `"MigrationCompleted"` | `"MigrationFailed"`
+
+```typescript
+interface ReplicaMigrationContent {
+  source:              string;   // source member address, or "null"
+  destination:         string;
+  partitionId:         number;
+  replicaIndex:        number;
+  "elapsedTime(ms)":   number;
+  MigrationState:      MigrationStateContent;   // nested; same shape as standalone MigrationState
+}
+```
+
+```json
+{"time":"19-03-2026 12:00:00","name":"MigrationCompleted","content":{
+  "source": "192.168.1.10:5701",
+  "destination": "192.168.1.11:5701",
+  "partitionId": 42,
+  "replicaIndex": 1,
+  "elapsedTime(ms)": 120,
+  "MigrationState": {
+    "startTime": "19-03-2026 12:00:00",
+    "plannedMigrations": 271,
+    "completedMigrations": 11,
+    "remainingMigrations": 260,
+    "totalElapsedTime(ms)": 3320
+  }
+}}
+```
+
+---
+
+### OperationHeartbeatPlugin
+
+**`name`:** `"OperationHeartbeat"` | periodic | **suppressed when no deviation exceeds threshold**
+
+```typescript
+interface OperationHeartbeatContent {
+  [memberKey: string]: MemberHeartbeatEntry;
+  // key is "member" + address.toString(), e.g. "member192.168.1.11:5701"
+}
+interface MemberHeartbeatEntry {
+  "deviation(%)":      number;   // float: percentage over expected interval
+  "noHeartbeat(ms)":   number;   // ms since last heartbeat
+  "lastHeartbeat(ms)": number;   // epoch ms of last heartbeat
+  "now(ms)":           number;   // epoch ms at check time
+}
+```
+
+```json
+{"time":"19-03-2026 12:00:00","name":"OperationHeartbeat","content":{
+  "member192.168.1.11:5701": {
+    "deviation(%)": 66.66667,
+    "noHeartbeat(ms)": 25000,
+    "lastHeartbeat(ms)": 1710849575000,
+    "now(ms)": 1710849600000
+  }
+}}
+```
+
+> **STANDARD vs JSON difference:** STANDARD also writes `lastHeartbeat(date-time)`
+> and `now(date-time)` (formatted strings). JSON omits them.
+
+---
+
+### MemberHeartbeatPlugin
+
+**`name`:** `"MemberHeartbeats"` | periodic | **suppressed when no deviation exceeds threshold**
+
+```typescript
+interface MemberHeartbeatsContent {
+  [memberKey: string]: MemberHeartbeatEntry;
+  // key is "member" + address.toString(), e.g. "member192.168.1.11:5701"
+}
+interface MemberHeartbeatEntry {
+  "deviation(%)":      number;
+  "noHeartbeat(ms)":   number;
+  "lastHeartbeat(ms)": number;
+  "now(ms)":           number;
+}
+```
+
+Same shape as `OperationHeartbeat`; different data source and threshold.
+
+```json
+{"time":"19-03-2026 12:00:00","name":"MemberHeartbeats","content":{
+  "member192.168.1.11:5701": {
+    "deviation(%)": 120.0,
+    "noHeartbeat(ms)": 11000,
+    "lastHeartbeat(ms)": 1710849589000,
+    "now(ms)": 1710849600000
+  }
+}}
+```
+
+---
+
+### NetworkingImbalancePlugin
+
+**`name`:** `"NetworkingImbalance"` | periodic (disabled by default)
+
+```typescript
+interface NetworkingImbalanceContent {
+  InputThreads:  ThreadsSection;
+  OutputThreads: ThreadsSection;
+}
+interface ThreadsSection {
+  [threadName: string]: ThreadEntry;   // key is NioThread.getName(), e.g. "hz.thread.io.in.0"
+}
+interface ThreadEntry {
+  "frames-percentage":          number;   // double 0.0–100.0 in JSON; formatted string in STANDARD
+  "frames":                     number;
+  "priority-frames-percentage": number;
+  "priority-frames":            number;
+  "bytes-percentage":           number;
+  "bytes":                      number;
+  "events-percentage":          number;
+  "events":                     number;
+  "handle-count-percentage":    number;
+  "handle-count":               number;
+  "tasks-percentage":           number;
+  "tasks":                      number;
+}
+```
+
+```json
+{"time":"19-03-2026 12:00:00","name":"NetworkingImbalance","content":{
+  "InputThreads": {
+    "hz.thread.io.in.0": {
+      "frames-percentage": 60.0, "frames": 600,
+      "priority-frames-percentage": 50.0, "priority-frames": 50,
+      "bytes-percentage": 55.5, "bytes": 55500,
+      "events-percentage": 66.6, "events": 333,
+      "handle-count-percentage": 70.0, "handle-count": 140,
+      "tasks-percentage": 80.0, "tasks": 80
+    }
+  },
+  "OutputThreads": {
+    "hz.thread.io.out.0": { "...": "same keys" }
+  }
+}}
+```
+
+> **STANDARD vs JSON difference:** `*-percentage` fields are `double` in JSON
+> (e.g. `33.333...`). In STANDARD they are formatted strings (e.g. `"33,333.33 %"`).
+
+---
+
+### OverloadedConnectionsPlugin
+
+**`name`:** `"OverloadedConnections"` | periodic (disabled by default) | suppressed when all queues below threshold
+
+```typescript
+interface OverloadedConnectionsContent {
+  connection: ConnectionEntry[];   // array; one item per overloaded queue scan
+}
+interface ConnectionEntry {
+  from:               string;   // local socket address, e.g. "/192.168.1.10:5701"
+  to:                 string;   // remote socket address, e.g. "/192.168.1.11:5701"
+  urgentPacketCount?: number;   // present for the priority queue scan
+  packetCount?:       number;   // present for the normal queue scan
+  // exactly one of the above is present per entry
+  sampleCount: number;
+  samples: {
+    entries?: SampleEntry[];
+  };
+}
+interface SampleEntry {
+  connectionType: string;   // deserialized operation class name or packet class name
+  sampleCount:    number;
+  percentage:     number;   // fraction 0.0–1.0 (not 0–100)
+}
+```
+
+> **STANDARD vs JSON difference:** STANDARD uses `connection.toString()` as a
+> nested section key (may appear twice for normal + priority queues). JSON uses
+> a single `"connection"` array so duplicate keys are impossible.
+
+```json
+{"time":"19-03-2026 12:00:00","epoch":1710849600000,"name":"OverloadedConnections","content":{"connection":[{"from":"/192.168.1.10:5701","to":"/192.168.1.11:5701","packetCount":15000,"sampleCount":950,"samples":{"entries":[{"connectionType":"com.hazelcast.map.impl.operation.PutOperation","sampleCount":700,"percentage":0.736},{"connectionType":"com.hazelcast.map.impl.operation.GetOperation","sampleCount":250,"percentage":0.263}]}},{"from":"/192.168.1.10:5701","to":"/192.168.1.11:5701","urgentPacketCount":200,"sampleCount":50,"samples":{}}]}}
+```
+
+---
+
+### StoreLatencyPlugin
+
+**`name`:** *service name* (dynamic, e.g. `"MapService"`, `"CacheService"`) | periodic (disabled by default)
+
+One JSON line per service with recorded probes. The `name` value is not a fixed
+constant — it is whatever string was passed to `newProbe(serviceName, ...)`.
+
+```typescript
+// Envelope name = serviceName (dynamic)
+interface StoreLatencyContent {
+  [dataStructureName: string]: DataStructureEntry;
+}
+interface DataStructureEntry {
+  [methodName: string]: MethodEntry;
+}
+interface MethodEntry {
+  count:              number;
+  "totalTime(us)":    number;
+  "avg(us)":          number;
+  "max(us)":          number;
+  "latency-distribution": {
+    [bucketLabel: string]: number;   // e.g. "4..7us", "64..127us"; only non-zero buckets
+  };
+}
+```
+
+```json
+{"time":"19-03-2026 12:00:00","name":"MapService","content":{
+  "employees": {
+    "load": {
+      "count": 100,
+      "totalTime(us)": 4200,
+      "avg(us)": 42,
+      "max(us)": 310,
+      "latency-distribution": {
+        "32..63us": 60,
+        "64..127us": 35,
+        "256..511us": 5
+      }
+    },
+    "store": {
+      "count": 50,
+      "totalTime(us)": 8100,
+      "avg(us)": 162,
+      "max(us)": 450,
+      "latency-distribution": { "128..255us": 40, "256..511us": 10 }
+    }
+  }
+}}
+```
+
+Bucket labels come from `LatencyDistribution.LATENCY_KEYS`. Only buckets with
+`value > 0` are emitted.
+
+---
+
+### OperationProfilerPlugin
+
+**`name`:** `"OperationsProfiler"` | periodic
+
+```typescript
+interface OperationsProfilerContent {
+  [operationClassName: string]: LatencyEntry;   // only classes with count > 0
+}
+interface LatencyEntry {
+  count:            number;
+  "totalTime(us)":  number;
+  "avg(us)":        number;
+  "max(us)":        number;
+  "latency-distribution": {
+    [bucketLabel: string]: number;
+  };
+}
+```
+
+```json
+{"time":"19-03-2026 12:00:00","name":"OperationsProfiler","content":{
+  "com.hazelcast.map.impl.operation.PutOperation": {
+    "count": 500,
+    "totalTime(us)": 12500,
+    "avg(us)": 25,
+    "max(us)": 310,
+    "latency-distribution": { "16..31us": 420, "32..63us": 75, "256..511us": 5 }
+  }
+}}
+```
+
+---
+
+### InvocationProfilerPlugin
+
+**`name`:** `"InvocationProfiler"` | periodic
+
+Same content schema as `OperationsProfiler`; sourced from
+`InvocationRegistry.latencyDistributions()`.
+
+```typescript
+interface InvocationProfilerContent {
+  [operationClassName: string]: LatencyEntry;   // same LatencyEntry as OperationsProfiler
+}
+```
+
+---
+
+### OperationThreadSamplerPlugin
+
+**`name`:** `"OperationThreadSamples"` | periodic (disabled by default)
+
+```typescript
+interface OperationThreadSamplesContent {
+  Partition: ThreadSamplesSection;
+  Generic:   ThreadSamplesSection;
+}
+interface ThreadSamplesSection {
+  entries?: SampleEntry[];   // absent when no samples recorded for this category
+}
+interface SampleEntry {
+  operation:  string;   // class name, optionally suffixed with "#<dataStructureName>" when includeName=true
+  samples:    number;
+  percentage: number;   // 0.0–100.0 (not 0.0–1.0)
+}
+```
+
+```json
+{"time":"19-03-2026 12:00:00","name":"OperationThreadSamples","content":{
+  "Partition": {
+    "entries": [
+      { "operation": "com.hazelcast.map.impl.operation.PutOperation", "samples": 12, "percentage": 60.0 },
+      { "operation": "com.hazelcast.map.impl.operation.GetOperation", "samples": 8,  "percentage": 40.0 }
+    ]
+  },
+  "Generic": {}
+}}
+```
+
+> **`percentage` scale:** 0–100 here (unlike `EventQueuePlugin` and
+> `OverloadedConnectionsPlugin` which use 0–1 fractions).
+
+---
+
+### MemberHazelcastInstanceInfoPlugin
+
+**`name`:** `"HazelcastInstance"` | periodic
+
+```typescript
+interface HazelcastInstanceContent {
+  thisAddress:  string;
+  isRunning:    boolean;
+  isLite:       boolean;
+  joined:       boolean;
+  nodeState:    "ACTIVE" | "PASSIVE" | "SHUTTING_DOWN" | "SHUT_DOWN" | "null";
+  clusterId:    string;   // UUID string, or "null" when not yet assigned
+  clusterSize:  number;
+  isMaster:     boolean;
+  masterAddress: string;   // address string, or "null" when unknown
+  Members: {
+    entries?: MemberAddressEntry[];
+  };
+}
+interface MemberAddressEntry {
+  address: string;   // e.g. "192.168.1.10:5701"
+}
+```
+
+```json
+{"time":"19-03-2026 12:00:00","name":"HazelcastInstance","content":{
+  "thisAddress": "192.168.1.10:5701",
+  "isRunning": true,
+  "isLite": false,
+  "joined": true,
+  "nodeState": "ACTIVE",
+  "clusterId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "clusterSize": 2,
+  "isMaster": true,
+  "masterAddress": "192.168.1.10:5701",
+  "Members": {
+    "entries": [
+      { "address": "192.168.1.10:5701" },
+      { "address": "192.168.1.11:5701" }
+    ]
+  }
+}}
+```
+
+---
+
+### InvocationSamplePlugin
+
+**`name`:** `"Invocations"` | periodic (disabled by default)
+
+```typescript
+interface InvocationsContent {
+  Pending:     PendingSection;
+  History:     SampleHistorySection;
+  SlowHistory: SampleHistorySection;
+}
+interface PendingSection {
+  entries?: (SlowInvocationEntry | TextEntry)[];
+  // TextEntry items: only the sentinel {"text":"max number of invocations to print reached."}
+}
+interface SlowInvocationEntry {
+  description: string;   // invocation.toString()
+  duration:    number;   // milliseconds
+  unit:        "ms";     // always the literal string "ms"
+}
+interface SampleHistorySection {
+  entries?: SampleEntry[];
+}
+interface SampleEntry {
+  operation: string;   // fully-qualified operation class name
+  samples:   number;
+}
+```
+
+```json
+{"time":"19-03-2026 12:00:00","epoch":1710849600000,"name":"Invocations","content":{"Pending":{"entries":[{"description":"BasicInvocation{op=PutOperation, ...}","duration":12000,"unit":"ms"},{"text":"max number of invocations to print reached."}]},"History":{"entries":[{"operation":"com.hazelcast.map.impl.operation.PutOperation","samples":50}]},"SlowHistory":{"entries":[{"operation":"com.hazelcast.map.impl.operation.PutOperation","samples":2}]}}}
+```
+
+<!-- expanded for reference:
+{"time":"19-03-2026 12:00:00","epoch":1710849600000,"name":"Invocations","content":{
+  "Pending": {
+    "entries": [
+      { "description": "BasicInvocation{op=PutOperation, ...}", "duration": 12000, "unit": "ms" },
+      { "text": "max number of invocations to print reached." }
+    ]
+  },
+  "History": {
+    "entries": [
+      { "operation": "com.hazelcast.map.impl.operation.PutOperation", "samples": 50 }
+    ]
+  },
+  "SlowHistory": {
+    "entries": [
+      { "operation": "com.hazelcast.map.impl.operation.PutOperation", "samples": 2 }
+    ]
+  }
+}}
+-->
 ```
 
 ---
@@ -91,28 +967,17 @@ Both types share the same array so their order is preserved.
 
 ### Key design decisions
 
-- JSON escaping is handled inline (`"`, `\`, control characters).
+- JSON escaping handles `"`, `\`, `\b`, `\f`, `\n`, `\r`, `\t` inline.
 - Numbers (`long`, `double`, `boolean`) are written as JSON literals, not
   quoted strings — preserving their type in JSON consumers.
-- `DiagnosticsLogConverter.parseStandard()` can round-trip an existing
-  STANDARD log entry to JSON (useful for offline conversion or testing).
+- The `"entries"` array is opened lazily; the key is absent entirely when no
+  entries are written in a section.
 
 #### Format-aware entry writing (acknowledged design compromise)
 
 Plugins that need to emit structured data in JSON mode call `writer.getFormat()`
-and branch on the result:
-
-```java
-if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
-    writer.writeStructuredEntry("operation", item, "samples", count);
-} else {
-    writer.writeEntry(item + " samples=" + count);   // STANDARD: unchanged
-}
-```
-
-The STANDARD path is preserved byte-for-byte. The JSON path emits a structured
-object into the shared `"entries"` array. This is intentionally verbose (two
-code paths per call site) to avoid any risk of changing the STANDARD output.
+and branch on the result. The STANDARD path is preserved byte-for-byte. The JSON
+path emits a structured object into the shared `"entries"` array.
 
 The following call sites use format-aware branching to emit structured JSON:
 
@@ -120,7 +985,7 @@ The following call sites use format-aware branching to emit structured JSON:
 |--------|-----------|-------------|
 | `BuildInfoPlugin` | `writeBuildNumber` | `BuildNumber` as `long` (STANDARD: string, no comma grouping) |
 | `NetworkingImbalancePlugin` | `writePercentageEntry` | percentage keys as `double` (STANDARD: `"X,XXX.XX %"` string) |
-| `OperationHeartbeatPlugin` | `run` | STANDARD appends `lastHeartbeat(date-time)` and `now(date-time)`; JSON omits them (epoch ms values sufficient) |
+| `OperationHeartbeatPlugin` | `run` | STANDARD appends `lastHeartbeat(date-time)` and `now(date-time)`; JSON omits them |
 | `MemberHeartbeatPlugin` | `render` | STANDARD appends `lastHeartbeat(date-time)` and `now(date-time)`; JSON omits them |
 | `SlowOperationPlugin.renderStackTrace` | stack trace lines | `"line"` |
 | `SlowOperationPlugin.renderInvocations` | per invocation | `"startedAt"`, `"duration(ms)"`, `"operationDetails"` (STANDARD also writes `started(date-time)`) |
@@ -135,587 +1000,16 @@ The following call sites use format-aware branching to emit structured JSON:
 | `InvocationSamplePlugin.runCurrent` | slow pending invocations | `"description"`, `"duration"`, `"unit"` |
 | `InvocationSamplePlugin.renderOccurrences` | invocation samples | `"operation"`, `"samples"` |
 | `OperationThreadSamplerPlugin.write` | thread samples | `"operation"`, `"samples"`, `"percentage"` |
+| `OverloadedConnectionsPlugin.renderJson` | connection array items | `"from"`, `"to"`, `"packetCount"`/`"urgentPacketCount"`, `"sampleCount"`, nested `"samples"` section |
 | `OverloadedConnectionsPlugin.renderSamples` | connection type samples | `"connectionType"`, `"sampleCount"`, `"percentage"` |
 
-**Exception — CloseCause stack trace lines in `SystemLogPlugin.renderConnectionClose`:**
-The individual `StackTraceElement` lines within a close cause continue to call
-`writeEntry(String)` unchanged. They are already inside a dedicated
-`"CloseCause"` section whose first entry provides the structured exception class
-and message; adding a second level of wrapping for every frame would add noise
-without value.
+**CloseCause stack trace lines:**
+Stack frames within a `"CloseCause"` section are written via `writeEntry` and
+therefore appear as `{"text":"<frame>"}` objects in the `entries` array. The
+first entry (exception class + message) is a structured object with
+`exceptionClass` and `message` keys.
 
 **Exception — `SystemLogPlugin.render(MigrationState)`:**
-`writeKeyValueEntryAsDateTime("startTime", ...)` is called unconditionally (both
-STANDARD and JSON), writing a formatted `"dd-MM-yyyy HH:mm:ss"` string in both
-formats. No epoch equivalent is available from `MigrationState.getStartTime()`
-so the string representation is the only option.
-
-`writeStructuredEntry` is defined on the `DiagnosticsLogWriter` interface with a
-default implementation that formats as `key=value` pairs and delegates to
-`writeEntry`, so STANDARD writers and test doubles do not need to override it.
-
-#### MetricsPlugin — one line per metric
-
-`MetricsPlugin` does not use a single top-level section. Instead it calls
-`writer.writeSectionKeyValue("Metric", timeMillis, metricKey, value)` for each
-collected metric. In JSON mode, this produces one JSON line per metric:
-
-```json
-{"time":"...","epoch":1710849600000,"name":"Metric","content":{"[metric=jvm.memory.heap.used]":1048576}}
-```
-
-This design predates the JSON format; each metric is self-contained so log
-aggregators can filter by metric name without parsing nested JSON.
-
----
-
-## Per-plugin JSON output specification
-
-> **Reading guide:** Each section shows the JSON `content` object only (the
-> envelope `{"time":...,"epoch":...,"name":...,"content":{...}}` is omitted).
-> Types: `S`=string, `N`=number (long/double), `B`=boolean, `[]`=array, `{}`=object.
-
----
-
-### BuildInfoPlugin
-
-**name:** `"BuildInfo"` | **schedule:** run-once
-
-```json
-{
-  "Build": "S",
-  "BuildNumber": "N",
-  "Revision": "S",
-  "UpstreamRevision": "S",     // optional
-  "Version": "S",
-  "SerialVersion": "S",
-  "Enterprise": "B"
-}
-```
-
-> `BuildNumber` is a `long` in JSON. In STANDARD format it is written as a
-> plain string to prevent comma-grouping (e.g. `"20250101"` not `"20,250,101"`).
-
----
-
-### ConfigPropertiesPlugin
-
-**name:** `"ConfigProperties"` | **schedule:** run-once
-
-```json
-{
-  "<hazelcast-property-name>": "S",
-  ...
-}
-```
-
-All values are strings regardless of the underlying type.
-
----
-
-### SystemPropertiesPlugin
-
-**name:** `"SystemProperties"` | **schedule:** run-once
-
-```json
-{
-  "<system-property-name>": "S",
-  ...
-}
-```
-
-All values are strings regardless of the underlying type.
-
----
-
-### MetricsPlugin
-
-**name:** `"Metric"` | **schedule:** periodic | **one JSON line per metric**
-
-```json
-{ "<[metric=fully.qualified.metric.string]>": "N" }
-```
-
-Each `MetricsRegistry.collect()` callback produces an independent JSON line with
-a single key-value pair. The value type is `long`, `double`, or `string`
-depending on `collectLong`, `collectDouble`, `collectException`, `collectNoValue`.
-
----
-
-### EventQueuePlugin
-
-**name:** `"EventQueues"` | **schedule:** periodic | **output only when queue size ≥ threshold**
-
-```json
-{
-  "worker=<N>": {
-    "eventCount": "N",
-    "sampleCount": "N",
-    "samples": {
-      "entries": [
-        { "eventType": "S", "sampleCount": "N", "percentage": "N" }
-      ]
-    }
-  }
-}
-```
-
-`"entries"` is omitted if the sample count is below threshold or the queue is
-empty.
-
----
-
-### PendingInvocationsPlugin
-
-**name:** `"PendingInvocations"` | **schedule:** periodic
-
-```json
-{
-  "count": "N",
-  "invocations": {
-    "entries": [
-      { "operation": "S", "count": "N" }
-    ]
-  }
-}
-```
-
-`"entries"` is omitted when the registry is empty or all counts are below
-threshold.
-
----
-
-### SlowOperationPlugin
-
-**name:** `"SlowOperations"` | **schedule:** periodic
-
-```json
-{
-  "<fully.qualified.OperationClassName>": {
-    "invocations": "N",
-    "stackTrace": {
-      "entries": [
-        { "line": "S" }
-      ]
-    },
-    "slowInvocations": {
-      "entries": [
-        {
-          "startedAt": "N",
-          "duration(ms)": "N",
-          "operationDetails": "S"
-        }
-      ]
-    }
-  }
-}
-```
-
-> In STANDARD format, `slowInvocations` also writes `started(date-time)` (a
-> formatted string) for each invocation. This is omitted in JSON because
-> `startedAt` (epoch ms) is sufficient for machine consumption.
-
----
-
-### SystemLogPlugin
-
-**name:** varies per event | **schedule:** 1-second poll | **one JSON line per event**
-
-This plugin emits a separate top-level JSON object for each event it dequeues.
-Possible top-level section names and their `content` shapes:
-
-#### `"Lifecycle"`
-
-```json
-{
-  "entries": [ { "state": "S" } ]
-}
-```
-
-`state` values: `STARTING`, `STARTED`, `SHUTTING_DOWN`, `SHUTDOWN`,
-`MERGING`, `MERGED`, `CLIENT_CONNECTED`, `CLIENT_DISCONNECTED`.
-
-#### `"MemberAdded"` / `"MemberRemoved"`
-
-```json
-{
-  "member": "S",
-  "Members": {
-    "entries": [
-      { "address": "S", "isThis": "B", "isMaster": "B" }
-    ]
-  }
-}
-```
-
-#### `"ConnectionAdded"` / `"ConnectionRemoved"`
-
-```json
-{
-  "entries": [ { "connection": "S" } ],
-  "type": "S",
-  "isAlive": "B",
-  "closeReason": "S",
-  "CloseCause": {
-    "entries": [
-      { "exceptionClass": "S", "message": "S" },
-      "<stack-frame-string>",
-      "..."
-    ]
-  }
-}
-```
-
-`"type"` is present only when the connection is a `ServerConnection`.
-`"closeReason"` and `"CloseCause"` are present only for `"ConnectionRemoved"`.
-`"CloseCause"` is present only when a `Throwable` close cause exists.
-Stack trace frames within `"CloseCause"` are plain strings (not structured
-objects); only the first entry (exception class + message) is structured.
-
-#### `"ClusterVersionChanged"`
-
-```json
-{
-  "entries": [ { "version": "S" } ]
-}
-```
-
-#### `"MigrationState"`
-
-```json
-{
-  "startTime": "S",
-  "plannedMigrations": "N",
-  "completedMigrations": "N",
-  "remainingMigrations": "N",
-  "totalElapsedTime(ms)": "N"
-}
-```
-
-> `"startTime"` is a formatted datetime string (`"dd-MM-yyyy HH:mm:ss"`) in
-> **both** STANDARD and JSON formats. `MigrationState.getStartTime()` does not
-> expose an epoch value, so no numeric equivalent is available.
-
-#### `"MigrationCompleted"` / `"MigrationFailed"`
-
-```json
-{
-  "source": "S",
-  "destination": "S",
-  "partitionId": "N",
-  "replicaIndex": "N",
-  "elapsedTime(ms)": "N",
-  "MigrationState": {
-    "startTime": "S",
-    "plannedMigrations": "N",
-    "completedMigrations": "N",
-    "remainingMigrations": "N",
-    "totalElapsedTime(ms)": "N"
-  }
-}
-```
-
----
-
-### OperationHeartbeatPlugin
-
-**name:** `"OperationHeartbeat"` | **schedule:** periodic | **output only when deviation ≥ threshold**
-
-```json
-{
-  "member<address>": {
-    "deviation(%)": "N",
-    "noHeartbeat(ms)": "N",
-    "lastHeartbeat(ms)": "N",
-    "now(ms)": "N"
-  }
-}
-```
-
-> In STANDARD format, each member sub-section also contains
-> `lastHeartbeat(date-time)` and `now(date-time)` (formatted strings). These
-> are omitted in JSON because the epoch-ms values are sufficient.
-
----
-
-### MemberHeartbeatPlugin
-
-**name:** `"MemberHeartbeats"` | **schedule:** periodic | **output only when deviation ≥ threshold**
-
-```json
-{
-  "member<address>": {
-    "deviation(%)": "N",
-    "noHeartbeat(ms)": "N",
-    "lastHeartbeat(ms)": "N",
-    "now(ms)": "N"
-  }
-}
-```
-
-> Same datetime-string omission as `OperationHeartbeatPlugin`.
-
----
-
-### NetworkingImbalancePlugin
-
-**name:** `"NetworkingImbalance"` | **schedule:** periodic (disabled by default)
-
-```json
-{
-  "InputThreads": {
-    "<thread-name>": {
-      "frames-percentage": "N",
-      "frames": "N",
-      "priority-frames-percentage": "N",
-      "priority-frames": "N",
-      "bytes-percentage": "N",
-      "bytes": "N",
-      "events-percentage": "N",
-      "events": "N",
-      "handle-count-percentage": "N",
-      "handle-count": "N",
-      "tasks-percentage": "N",
-      "tasks": "N"
-    }
-  },
-  "OutputThreads": {
-    "<thread-name>": { "...": "same keys as above" }
-  }
-}
-```
-
-> Percentage fields are `double` in JSON (e.g. `33.333...`) and a formatted
-> string in STANDARD (e.g. `"33,333.33 %"`).
-
----
-
-### OverloadedConnectionsPlugin
-
-**name:** `"OverloadedConnections"` | **schedule:** periodic (disabled by default)
-
-```json
-{
-  "<connection.toString()>": {
-    "urgentPacketCount": "N",
-    "sampleCount": "N",
-    "samples": {
-      "entries": [
-        { "connectionType": "S", "sampleCount": "N", "percentage": "N" }
-      ]
-    }
-  }
-}
-```
-
-`"urgentPacketCount"` is used for the priority queue; `"packetCount"` for the
-normal queue. Both may appear for the same connection (two separate
-`startSection`/`endSection` pairs).
-
----
-
-### StoreLatencyPlugin
-
-**name:** `"<serviceName>"` | **schedule:** periodic (disabled by default)
-
-```json
-{
-  "<dataStructureName>": {
-    "<methodName>": {
-      "count": "N",
-      "totalTime(us)": "N",
-      "avg(us)": "N",
-      "max(us)": "N",
-      "latency-distribution": {
-        "<bucket-label>": "N"
-      }
-    }
-  }
-}
-```
-
-Bucket labels are from `LatencyDistribution.LATENCY_KEYS` (e.g. `"0us"`,
-`"1us"`, `"2..3us"`, `"4..7us"`, …, `"134217728us.."`). Only non-zero buckets
-are emitted.
-
----
-
-### OperationProfilerPlugin
-
-**name:** `"OperationsProfiler"` | **schedule:** periodic
-
-```json
-{
-  "<fully.qualified.OperationClassName>": {
-    "count": "N",
-    "totalTime(us)": "N",
-    "avg(us)": "N",
-    "max(us)": "N",
-    "latency-distribution": {
-      "<bucket-label>": "N"
-    }
-  }
-}
-```
-
-Only operations with at least one recorded sample are emitted.
-
----
-
-### InvocationProfilerPlugin
-
-**name:** `"InvocationProfiler"` | **schedule:** periodic
-
-Same structure as `OperationProfilerPlugin` but sourced from
-`InvocationRegistry.latencyDistributions()`.
-
-```json
-{
-  "<fully.qualified.OperationClassName>": {
-    "count": "N",
-    "totalTime(us)": "N",
-    "avg(us)": "N",
-    "max(us)": "N",
-    "latency-distribution": {
-      "<bucket-label>": "N"
-    }
-  }
-}
-```
-
----
-
-### OperationThreadSamplerPlugin
-
-**name:** `"OperationThreadSamples"` | **schedule:** periodic (disabled by default)
-
-```json
-{
-  "Partition": {
-    "entries": [
-      { "operation": "S", "samples": "N", "percentage": "N" }
-    ]
-  },
-  "Generic": {
-    "entries": [
-      { "operation": "S", "samples": "N", "percentage": "N" }
-    ]
-  }
-}
-```
-
-`"entries"` is omitted for a category when no samples have been recorded.
-
-> In STANDARD format, these are written as `writeKeyValueEntry(name, "count pct%")`
-> flat key-value pairs, not as structured entries.
-
----
-
-### MemberHazelcastInstanceInfoPlugin
-
-**name:** `"HazelcastInstance"` | **schedule:** periodic
-
-```json
-{
-  "thisAddress": "S",
-  "isRunning": "B",
-  "isLite": "B",
-  "joined": "B",
-  "nodeState": "S",
-  "clusterId": "S",
-  "clusterSize": "N",
-  "isMaster": "B",
-  "masterAddress": "S",
-  "Members": {
-    "entries": [
-      { "address": "S" }
-    ]
-  }
-}
-```
-
-> In STANDARD format, member addresses are written as plain `writeEntry` strings.
-> In JSON they are structured objects with a single `"address"` key.
-
----
-
-### InvocationSamplePlugin
-
-**name:** `"Invocations"` | **schedule:** periodic (disabled by default)
-
-```json
-{
-  "Pending": {
-    "entries": [
-      { "description": "S", "duration": "N", "unit": "S" },
-      "max number of invocations to print reached."
-    ]
-  },
-  "History": {
-    "entries": [
-      { "operation": "S", "samples": "N" }
-    ]
-  },
-  "SlowHistory": {
-    "entries": [
-      { "operation": "S", "samples": "N" }
-    ]
-  }
-}
-```
-
-- `"Pending"` entries contain slow invocations (duration ≥ threshold). `unit`
-  is always `"ms"`. The sentinel string `"max number of invocations to print
-  reached."` may appear as a plain string entry if the configured max is hit.
-- `"History"` accumulates all invocations seen (regardless of speed).
-- `"SlowHistory"` accumulates only slow invocations.
-- `"entries"` is omitted for a section when no items were collected.
-
-> In STANDARD format, `"Pending"` entries are written as
-> `writeEntry(invocation + " duration=" + durationMs + " ms")`.
-
----
-
-## Issues found during validation (all fixed)
-
-1. **`DiagnosticsConfig.equals()` and `hashCode()` omitted `logFormat`.**
-   Two configs differing only in log format compared as equal. Fixed by adding
-   `logFormat` to both methods and `toString()`.
-
-2. **`writeEntry()` produced duplicate `"entry"` keys (invalid JSON per RFC 8259).**
-   Fixed by collecting all `writeEntry()` calls in a section into a single
-   `"entries": [...]` array. The key was also renamed from `"entry"` to `"entries"`
-   to make the always-array contract explicit. A single call still produces an
-   array of length 1. The `"entries"` key is omitted entirely when no entries
-   are written.
-
-3. **`OperationHeartbeatPlugin` wrote `lastHeartbeat(date-time)` and `now(date-time)` in JSON.**
-   These are redundant when the epoch-ms values are present. Fixed by guarding
-   both `writeKeyValueEntryAsDateTime` calls with
-   `writer.getFormat() != DiagnosticsLogFormat.JSON` (matching `MemberHeartbeatPlugin`
-   which already had this guard).
-
-4. **`SlowOperationPlugin.renderInvocations` wrote multiple invocations as flat key-value pairs.**
-   For multiple invocations, keys like `startedAt` and `duration(ms)` would be
-   repeated, violating RFC 8259. Fixed by using `writeStructuredEntry` per
-   invocation in JSON mode. The `started(date-time)` entry is now written only
-   in STANDARD mode.
-
----
-
-## Tests
-
-| Test class | Covers |
-|------------|--------|
-| `DiagnosticsLogWriterJsonImplTest` | Basic JSON output, escaping, epoch field, nested sections, `writeStructuredEntry` types and mixed arrays, boundary conditions |
-| `DiagnosticsLogConverterTest` | STANDARD→`DiagnosticEntry`→JSON round-trip, edge cases, null epoch handling |
-| `DiagnosticsLogWriterFactoryTest` | Factory dispatch: JSON→`DiagnosticsLogWriterJsonImpl`, STANDARD→`DiagnosticsLogWriterImpl`, epoch flag propagation |
-| `DiagnosticsPluginsConverterTest` | Real plugin output converted to JSON |
-| `DiagnosticsConverterRoundTripTest` | Full STANDARD→parse→JSON→parse→STANDARD round-trip for all 18 plugins |
-| `DiagnosticsConfigTest` | `equals`, `hashCode`, `toString`, serialization coverage for `logFormat` |
-| `DiagnosticsTest` | Integration: `DiagnosticsConfig.logFormat` wired end-to-end |
-| `SystemLogPluginTest` | JSON membership event produces `"address"`, `"isThis"`, `"isMaster"` keys; date-time entries absent |
-| `MemberHeartbeatPluginTest` | JSON format omits `lastHeartbeat(date-time)` and `now(date-time)` |
-| `InvocationPluginTest` | JSON invocation samples produce `"operation"`, `"samples"`, `"percentage"` keys |
-| `EventQueuePluginTest` | JSON event samples produce `"eventType"`, `"sampleCount"`, `"percentage"` keys |
-| `StoreLatencyPluginTest` | JSON format emits structured latency-distribution section |
+`startTime` is written with `writeKeyValueEntryAsDateTime` unconditionally in
+both formats, producing a `"dd-MM-yyyy HH:mm:ss"` string. No epoch value is
+available from `MigrationState.getStartTime()`.

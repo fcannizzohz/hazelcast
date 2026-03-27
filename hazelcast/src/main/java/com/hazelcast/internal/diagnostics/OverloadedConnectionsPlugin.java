@@ -162,13 +162,31 @@ public class OverloadedConnectionsPlugin extends DiagnosticsPlugin {
     }
 
     private void render(DiagnosticsLogWriter writer, TcpServerConnection connection, boolean priority, int sampleCount) {
-        writer.startSection(connection.toString());
+        if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+            renderJson(writer, connection, priority, sampleCount);
+        } else {
+            renderStandard(writer, connection, priority, sampleCount);
+        }
+    }
 
+    private void renderStandard(DiagnosticsLogWriter writer, TcpServerConnection connection,
+                                boolean priority, int sampleCount) {
+        writer.startSection(connection.toString());
         writer.writeKeyValueEntry(priority ? "urgentPacketCount" : "packetCount", packets.size());
         writer.writeKeyValueEntry("sampleCount", sampleCount);
         renderSamples(writer, sampleCount);
-
         writer.endSection();
+    }
+
+    private void renderJson(DiagnosticsLogWriter writer, TcpServerConnection connection,
+                            boolean priority, int sampleCount) {
+        writer.startArrayItemSection("connection");
+        writer.writeKeyValueEntry("from", String.valueOf(connection.getChannel().localSocketAddress()));
+        writer.writeKeyValueEntry("to", String.valueOf(connection.getChannel().remoteSocketAddress()));
+        writer.writeKeyValueEntry(priority ? "urgentPacketCount" : "packetCount", packets.size());
+        writer.writeKeyValueEntry("sampleCount", sampleCount);
+        renderSamples(writer, sampleCount);
+        writer.endArrayItemSection();
     }
 
     private void renderSamples(DiagnosticsLogWriter writer, int sampleCount) {

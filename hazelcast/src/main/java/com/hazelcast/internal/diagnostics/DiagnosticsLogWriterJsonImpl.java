@@ -31,8 +31,13 @@ import java.time.format.DateTimeFormatter;
  * <p>Multiple {@link #writeEntry(String)} calls within the same section are
  * collected under a single {@code "entries"} JSON array, so the output is always
  * valid JSON even when a plugin writes several plain entries in one section.
- * Any subsequent {@link #writeKeyValueEntry} or nested {@link #startSection}
- * call automatically closes the open array first.
+ * Each plain entry is wrapped as {@code {"text":"<value>"}} so every item in the
+ * array is a JSON object.  Any subsequent {@link #writeKeyValueEntry} or nested
+ * {@link #startSection} call automatically closes the open array first.
+ *
+ * <p>{@code "epoch"} (Unix epoch in milliseconds) is always emitted in the
+ * envelope, regardless of the {@code includeEpochTime} constructor argument
+ * (which is accepted for API compatibility but ignored in JSON mode).
  */
 public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
 
@@ -46,7 +51,6 @@ public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
     private static final int MAX_SECTION_LEVELS = 8;
 
     private final ILogger logger;
-    private final boolean includeEpochTime;
 
     private PrintWriter printWriter;
     private int sectionLevel = -1;
@@ -54,14 +58,19 @@ public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
 
     /**
      * Tracks, per section level, whether an {@code "entries":[...]} array has been
-     * opened but not yet closed. Used to collect multiple {@link #writeEntry}
-     * and {@link #writeStructuredEntry} calls into a single JSON array and to
-     * close that array before any key-value entry or nested section is written.
+     * opened but not yet closed.
      */
     private final boolean[] entryArrayOpen = new boolean[MAX_SECTION_LEVELS];
 
+    /**
+     * Tracks, per section level, whether a named array (from
+     * {@link #startArrayItemSection}) is open and which key it belongs to.
+     */
+    private final boolean[] namedArrayOpen = new boolean[MAX_SECTION_LEVELS];
+    private final String[] namedArrayKey = new String[MAX_SECTION_LEVELS];
+
     public DiagnosticsLogWriterJsonImpl(boolean includeEpochTime, ILogger logger) {
-        this.includeEpochTime = includeEpochTime;
+        // includeEpochTime is accepted for API compatibility; epoch is always emitted in JSON.
         this.logger = logger != null ? logger : Logger.getLogger(getClass());
     }
 
@@ -102,16 +111,15 @@ public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
         if (sectionLevel == -1) {
             printWriter.print("{\"time\":\"");
             printWriter.print(DATE_TIME_FORMATTER.format(Instant.ofEpochMilli(timeMillis)));
-            printWriter.print("\"");
-            if (includeEpochTime) {
-                printWriter.print(",\"epoch\":");
-                printWriter.print(timeMillis);
-            }
+            // Change 1: epoch is always present in JSON format
+            printWriter.print("\",\"epoch\":");
+            printWriter.print(timeMillis);
             printWriter.print(",\"name\":\"");
             printWriter.print(name);
             printWriter.print("\",\"content\":{");
         } else {
             closeEntryArrayIfOpen();
+            closeNamedArrayIfOpen();
             if (!firstInSection) {
                 printWriter.print(",");
             }
@@ -128,12 +136,15 @@ public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
         firstInSection = true;
         if (sectionLevel >= 0 && sectionLevel < MAX_SECTION_LEVELS) {
             entryArrayOpen[sectionLevel] = false;
+            namedArrayOpen[sectionLevel] = false;
+            namedArrayKey[sectionLevel] = null;
         }
     }
 
     @Override
     public void endSection() {
         closeEntryArrayIfOpen();
+        closeNamedArrayIfOpen();
         printWriter.print("}");
         if (sectionLevel > -1) {
             sectionLevel--;
@@ -148,15 +159,20 @@ public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
         }
     }
 
+    /**
+     * Writes a plain-text entry into the {@code "entries"} array.
+     * The string is wrapped as {@code {"text":"<escaped value>"}} so every
+     * item in the array is a JSON object.
+     */
     @Override
     public void writeEntry(String s) {
         if (sectionLevel < 0 || sectionLevel >= MAX_SECTION_LEVELS) {
             return;
         }
         openOrContinueEntryArray();
-        printWriter.print("\"");
+        printWriter.print("{\"text\":\"");
         printWriter.print(escapeJson(s));
-        printWriter.print("\"");
+        printWriter.print("\"}");
     }
 
     @Override
@@ -202,7 +218,7 @@ public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
      * Emits a JSON object into the {@code "entries"} array using the supplied
      * key/value pairs. The array is shared with {@link #writeEntry(String)}, so
      * plain-string entries and structured-object entries can coexist in the same
-     * section (e.g. a list of stack-trace lines mixed with a sentinel message).
+     * section.
      */
     @Override
     public void writeStructuredEntry(Object... kvPairs) {
@@ -223,6 +239,56 @@ public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
         printWriter.print("}");
     }
 
+    /**
+     * Starts a new object within a named array at the current section level.
+     * Multiple calls with the same {@code arrayKey} append further items.
+     * Calling with a different key closes the previous array first.
+     */
+    @Override
+    public void startArrayItemSection(String arrayKey) {
+        if (sectionLevel < 0 || sectionLevel >= MAX_SECTION_LEVELS - 1) {
+            return;
+        }
+        closeEntryArrayIfOpen();
+        if (!namedArrayOpen[sectionLevel] || !arrayKey.equals(namedArrayKey[sectionLevel])) {
+            // Close any open named array for a different key, then open this one
+            closeNamedArrayIfOpen();
+            if (!firstInSection) {
+                printWriter.print(",");
+            }
+            printWriter.print("\"");
+            printWriter.print(escapeJson(arrayKey));
+            printWriter.print("\":[");
+            namedArrayOpen[sectionLevel] = true;
+            namedArrayKey[sectionLevel] = arrayKey;
+            firstInSection = false;
+        } else {
+            // Same key — append another item to the open array
+            printWriter.print(",");
+        }
+        printWriter.print("{");
+        sectionLevel++;
+        firstInSection = true;
+        entryArrayOpen[sectionLevel] = false;
+        namedArrayOpen[sectionLevel] = false;
+        namedArrayKey[sectionLevel] = null;
+    }
+
+    /**
+     * Ends the current array item object started by {@link #startArrayItemSection}.
+     */
+    @Override
+    public void endArrayItemSection() {
+        if (sectionLevel <= 0) {
+            return;
+        }
+        closeEntryArrayIfOpen();
+        closeNamedArrayIfOpen();
+        printWriter.print("}");
+        sectionLevel--;
+        firstInSection = false;
+    }
+
     @Override
     public void resetSectionLevel() {
         sectionLevel = -1;
@@ -230,14 +296,9 @@ public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
 
     // ------------------------------------------------------------------ helpers
 
-    /**
-     * Writes the JSON key preamble for a key-value entry: closes any open entries
-     * array, emits a comma separator if needed, then emits {@code "key":}.
-     * The caller is responsible for printing the value and setting nothing else —
-     * {@code firstInSection} is set to {@code false} here.
-     */
     private void writeKey(String key) {
         closeEntryArrayIfOpen();
+        closeNamedArrayIfOpen();
         if (!firstInSection) {
             printWriter.print(",");
         }
@@ -247,11 +308,6 @@ public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
         firstInSection = false;
     }
 
-    /**
-     * Opens the {@code "entries"} array at the current section level if it is not
-     * already open, or appends a comma separator if it is. Must only be called
-     * when {@code sectionLevel} is in bounds.
-     */
     private void openOrContinueEntryArray() {
         if (!entryArrayOpen[sectionLevel]) {
             if (!firstInSection) {
@@ -265,11 +321,6 @@ public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
         }
     }
 
-    /**
-     * Prints a JSON value for a typed Java object. Numeric subtypes are written
-     * as JSON numbers; booleans as JSON booleans; null as {@code null}; everything
-     * else as a quoted, escaped JSON string.
-     */
     private void printJsonValue(Object v) {
         if (v instanceof Long || v instanceof Integer) {
             printWriter.print(((Number) v).longValue());
@@ -286,15 +337,18 @@ public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
         }
     }
 
-    /**
-     * If an {@code "entries"} array is currently open at the current section level,
-     * close it. Called before writing any key-value pair or nested section to
-     * ensure the JSON remains valid.
-     */
     private void closeEntryArrayIfOpen() {
         if (sectionLevel >= 0 && sectionLevel < MAX_SECTION_LEVELS && entryArrayOpen[sectionLevel]) {
             printWriter.print("]");
             entryArrayOpen[sectionLevel] = false;
+        }
+    }
+
+    private void closeNamedArrayIfOpen() {
+        if (sectionLevel >= 0 && sectionLevel < MAX_SECTION_LEVELS && namedArrayOpen[sectionLevel]) {
+            printWriter.print("]");
+            namedArrayOpen[sectionLevel] = false;
+            namedArrayKey[sectionLevel] = null;
         }
     }
 

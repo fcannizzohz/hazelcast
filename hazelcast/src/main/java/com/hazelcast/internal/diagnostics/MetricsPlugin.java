@@ -18,11 +18,14 @@ package com.hazelcast.internal.diagnostics;
 
 import com.hazelcast.internal.metrics.MetricDescriptor;
 import com.hazelcast.internal.metrics.MetricsRegistry;
+import com.hazelcast.internal.metrics.ProbeUnit;
 import com.hazelcast.internal.metrics.collectors.MetricsCollector;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.spi.properties.ClusterProperty;
 import com.hazelcast.spi.properties.HazelcastProperties;
 import com.hazelcast.spi.properties.HazelcastProperty;
+
+import java.util.Locale;
 
 import static com.hazelcast.internal.metrics.MetricTarget.DIAGNOSTICS;
 import static java.util.concurrent.TimeUnit.SECONDS;
@@ -100,8 +103,7 @@ public class MetricsPlugin extends DiagnosticsPlugin {
         private static final String SECTION_NAME = "Metric";
 
         private DiagnosticsLogWriter writer;
-        private long
-                timeMillis;
+        private long timeMillis;
 
         @Override
         public void collectLong(MetricDescriptor descriptor, long value) {
@@ -109,21 +111,21 @@ public class MetricsPlugin extends DiagnosticsPlugin {
             // during shutdown although plugin is closed, it has no ability to close the metric collector.
             // So we need to check if writer is null or not.
             if (writer != null && descriptor.isTargetIncluded(DIAGNOSTICS)) {
-                writer.writeSectionKeyValue(SECTION_NAME, timeMillis, descriptor.metricString(), value);
+                writer.writeSectionKeyValue(SECTION_NAME, timeMillis, metricKey(descriptor), value);
             }
         }
 
         @Override
         public void collectDouble(MetricDescriptor descriptor, double value) {
             if (writer != null && descriptor.isTargetIncluded(DIAGNOSTICS)) {
-                writer.writeSectionKeyValue(SECTION_NAME, timeMillis, descriptor.metricString(), value);
+                writer.writeSectionKeyValue(SECTION_NAME, timeMillis, metricKey(descriptor), value);
             }
         }
 
         @Override
         public void collectException(MetricDescriptor descriptor, Exception e) {
             if (writer != null && descriptor.isTargetIncluded(DIAGNOSTICS)) {
-                writer.writeSectionKeyValue(SECTION_NAME, timeMillis, descriptor.metricString(),
+                writer.writeSectionKeyValue(SECTION_NAME, timeMillis, metricKey(descriptor),
                         e.getClass().getName() + ':' + e.getMessage());
             }
         }
@@ -131,8 +133,51 @@ public class MetricsPlugin extends DiagnosticsPlugin {
         @Override
         public void collectNoValue(MetricDescriptor descriptor) {
             if (writer != null && descriptor.isTargetIncluded(DIAGNOSTICS)) {
-                writer.writeSectionKeyValue(SECTION_NAME, timeMillis, descriptor.metricString(), "NA");
+                writer.writeSectionKeyValue(SECTION_NAME, timeMillis, metricKey(descriptor), "NA");
             }
         }
+
+        private String metricKey(MetricDescriptor descriptor) {
+            if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+                return toJsonMetricKey(descriptor);
+            }
+            return descriptor.metricString();
+        }
+    }
+
+    /**
+     * Formats a metric descriptor as a human-readable JSON key.
+     * Format: {@code [prefix.]metric[discriminator=value](unit)}
+     * where the discriminator and unit parts are omitted when not present.
+     *
+     * <p>Examples:
+     * <ul>
+     *   <li>{@code jvm.memory.heap.used(bytes)}</li>
+     *   <li>{@code map.size[instance=myMap]}</li>
+     *   <li>{@code os.cpu.load}</li>
+     * </ul>
+     */
+    static String toJsonMetricKey(MetricDescriptor descriptor) {
+        StringBuilder key = new StringBuilder();
+        String prefix = descriptor.prefix();
+        if (prefix != null) {
+            key.append(prefix).append('.');
+        }
+        String metric = descriptor.metric();
+        if (metric != null) {
+            key.append(metric);
+        }
+        String discriminatorValue = descriptor.discriminatorValue();
+        if (discriminatorValue != null) {
+            key.append('[').append(descriptor.discriminator())
+               .append('=').append(discriminatorValue).append(']');
+        }
+        descriptor.readTags((tag, tagValue) ->
+                key.append('[').append(tag).append('=').append(tagValue).append(']'));
+        ProbeUnit unit = descriptor.unit();
+        if (unit != null) {
+            key.append('(').append(unit.name().toLowerCase(Locale.ROOT)).append(')');
+        }
+        return key.toString();
     }
 }

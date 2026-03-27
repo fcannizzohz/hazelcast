@@ -20,6 +20,9 @@ import com.hazelcast.logging.ILogger;
 import com.hazelcast.logging.Logger;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -34,6 +37,9 @@ import java.util.regex.Pattern;
 public class DiagnosticsLogConverter {
 
     private static final ILogger LOGGER = Logger.getLogger(DiagnosticsLogConverter.class);
+
+    private static final DateTimeFormatter TIME_FORMATTER =
+            DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm:ss");
 
     private static final String TOP_LEVEL_PATTERN_STR =
             "^(\\d{2}-\\d{2}-\\d{4} \\d{2}:\\d{2}:\\d{2}) (?:(\\d+) )?(.+)\\[\\]?$";
@@ -91,12 +97,31 @@ public class DiagnosticsLogConverter {
         String epochStr = matcher.group(2);
         if (epochStr != null) {
             entry.epoch = Long.parseLong(epochStr);
+        } else {
+            entry.epoch = deriveEpochFromTime(entry.time);
         }
         entry.name = unescape(matcher.group(3));
 
         parseContent(lines, 1, entry.content, 0);
 
         return entry;
+    }
+
+    /**
+     * Parses the {@code "dd-MM-yyyy HH:mm:ss"} time string into a Unix epoch millisecond value
+     * using the JVM default timezone.  The parsed time has second precision, so the millisecond
+     * component is always {@code 000}.  Returns {@code 0} and logs a warning on parse failure.
+     */
+    private static long deriveEpochFromTime(String time) {
+        try {
+            return LocalDateTime.parse(time, TIME_FORMATTER)
+                    .atZone(ZoneId.systemDefault())
+                    .toInstant()
+                    .toEpochMilli();
+        } catch (Exception e) {
+            LOGGER.warning("Could not derive epoch from time string '" + time + "': " + e.getMessage());
+            return 0L;
+        }
     }
 
     private int parseContent(String[] lines, int lineIndex, Map<String, Object> content, int depth) {
@@ -338,14 +363,34 @@ public class DiagnosticsLogConverter {
                 sb.append(",");
             }
             sb.append("\"").append(escapeJson(entry.getKey())).append("\":");
-            appendValueToJson(sb, entry.getValue());
+            appendValueToJson(sb, entry.getKey(), entry.getValue());
             first = false;
         }
         sb.append("}");
     }
 
-    private void appendValueToJson(StringBuilder sb, Object value) {
-        if (value instanceof Map) {
+    /**
+     * Serialises a value to JSON. When {@code key} is {@code "entries"} and the
+     * value is a list, plain-string items are wrapped as {@code {"text":"..."}} so
+     * every element in the array is a JSON object.
+     */
+    private void appendValueToJson(StringBuilder sb, String key, Object value) {
+        if ("entries".equals(key) && value instanceof List) {
+            sb.append("[");
+            boolean first = true;
+            for (Object item : (List<Object>) value) {
+                if (!first) {
+                    sb.append(",");
+                }
+                if (item instanceof String) {
+                    sb.append("{\"text\":\"").append(escapeJson((String) item)).append("\"}");
+                } else {
+                    appendValueToJson(sb, null, item);
+                }
+                first = false;
+            }
+            sb.append("]");
+        } else if (value instanceof Map) {
             appendMapToJson(sb, (Map<String, Object>) value);
         } else if (value instanceof List) {
             sb.append("[");
@@ -354,7 +399,7 @@ public class DiagnosticsLogConverter {
                 if (!first) {
                     sb.append(",");
                 }
-                appendValueToJson(sb, item);
+                appendValueToJson(sb, null, item);
                 first = false;
             }
             sb.append("]");
@@ -472,7 +517,7 @@ public class DiagnosticsLogConverter {
             if ("entries".equals(key) && value instanceof List) {
                 for (Object item : (List<Object>) value) {
                     appendStandardIndent(sb, depth);
-                    sb.append(escapeStandard(String.valueOf(item)));
+                    appendStandardEntryItem(sb, item);
                 }
             } else if (value instanceof Map) {
                 appendStandardIndent(sb, depth);
@@ -491,6 +536,38 @@ public class DiagnosticsLogConverter {
                 sb.append(escapeStandard(key)).append('=');
                 appendStandardValue(sb, value);
             }
+        }
+    }
+
+    /**
+     * Renders a single item from an {@code "entries"} list in STANDARD format.
+     * A {@code {"text":"..."}} map is unwrapped to its plain string value.
+     * Any other map is rendered as space-separated {@code key=value} pairs.
+     * Non-map items are converted to their escaped string representation.
+     */
+    @SuppressWarnings("unchecked")
+    private void appendStandardEntryItem(StringBuilder sb, Object item) {
+        if (item instanceof Map) {
+            Map<String, Object> itemMap = (Map<String, Object>) item;
+            if (itemMap.size() == 1 && itemMap.containsKey("text")) {
+                sb.append(escapeStandard(String.valueOf(itemMap.get("text"))));
+            } else {
+                appendStandardStructuredEntry(sb, itemMap);
+            }
+        } else {
+            sb.append(escapeStandard(String.valueOf(item)));
+        }
+    }
+
+    private void appendStandardStructuredEntry(StringBuilder sb, Map<String, Object> itemMap) {
+        boolean firstPair = true;
+        for (Map.Entry<String, Object> pair : itemMap.entrySet()) {
+            if (!firstPair) {
+                sb.append(' ');
+            }
+            sb.append(escapeStandard(pair.getKey())).append('=');
+            appendStandardValue(sb, pair.getValue());
+            firstPair = false;
         }
     }
 
