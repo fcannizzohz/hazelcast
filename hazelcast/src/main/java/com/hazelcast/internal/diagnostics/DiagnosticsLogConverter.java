@@ -20,6 +20,14 @@ import com.hazelcast.logging.ILogger;
 import com.hazelcast.logging.Logger;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -50,6 +58,9 @@ public class DiagnosticsLogConverter {
     private static final Pattern TOP_LEVEL_INLINE_PATTERN = Pattern.compile(
             "^(\\d{2}-\\d{2}-\\d{4} \\d{2}:\\d{2}:\\d{2}) (?:(\\d+) )?([^\\[]+)\\[(.+)\\]$");
     private static final int INLINE_GROUP_CONTENT = 4;
+    // Matches the first line of any STANDARD diagnostics entry (date/time header).
+    private static final Pattern ENTRY_HEADER_PATTERN =
+            Pattern.compile("^\\d{2}-\\d{2}-\\d{4} \\d{2}:\\d{2}:\\d{2}.*");
     private static final String INDENT = "                          ";
     private static final int INDENT_BASE = 26;
     private static final int DEPTH_INDENT_SIZE = 8;
@@ -682,5 +693,178 @@ public class DiagnosticsLogConverter {
             }
         }
         return sb.toString();
+    }
+
+    // -------------------------------------------------------------------------
+    // CLI entry point
+    // -------------------------------------------------------------------------
+
+    /**
+     * Converts STANDARD-format Hazelcast diagnostics log files to NDJSON.
+     *
+     * <p>Usage:
+     * <pre>
+     *   java DiagnosticsLogConverter --in=&lt;glob&gt; [--out=&lt;dir&gt;]
+     * </pre>
+     *
+     * <ul>
+     *   <li>{@code --in}  — glob pattern for input files, e.g. {@code /var/log/hz/*.log}</li>
+     *   <li>{@code --out} — output directory (optional; defaults to the input directory)</li>
+     * </ul>
+     *
+     * <p>Each matching input file produces a {@code .json} file in the output directory.
+     * The output is NDJSON: one compact JSON object per line, one line per diagnostics entry.
+     */
+    public static void main(String[] args) throws IOException {
+        String[] parsed = parseCliArgs(args);
+        if (parsed == null) {
+            return;
+        }
+        String inGlob = parsed[0];
+        Path inPath = Paths.get(inGlob);
+        Path inDir = inPath.getParent() != null ? inPath.getParent() : Paths.get(".");
+        String fileGlob = inPath.getFileName().toString();
+        Path outDir = parsed[1] != null ? Paths.get(parsed[1]) : inDir;
+        if (!Files.exists(outDir)) {
+            Files.createDirectories(outDir);
+        }
+        runConversion(inDir, fileGlob, outDir, inGlob);
+    }
+
+    /**
+     * Parses CLI arguments and returns {@code String[2]}: {@code [0]} = inGlob,
+     * {@code [1]} = outDir (may be null).  Returns {@code null} and prints usage on error.
+     */
+    private static String[] parseCliArgs(String[] args) {
+        String inGlob = null;
+        String outDir = null;
+        final String inPrefix = "--in=";
+        final String outPrefix = "--out=";
+        for (String arg : args) {
+            if (arg.startsWith(inPrefix)) {
+                inGlob = arg.substring(inPrefix.length());
+            } else if (arg.startsWith(outPrefix)) {
+                outDir = arg.substring(outPrefix.length());
+            } else {
+                System.err.println("Unknown argument: " + arg);
+                printUsage();
+                return null;
+            }
+        }
+        if (inGlob == null) {
+            System.err.println("Missing required argument: --in");
+            printUsage();
+            return null;
+        }
+        return new String[]{inGlob, outDir};
+    }
+
+    private static void runConversion(Path inDir, String fileGlob,
+                                      Path outDir, String inGlob) throws IOException {
+        DiagnosticsLogConverter converter = new DiagnosticsLogConverter();
+        int filesConverted = 0;
+        int totalEntries = 0;
+        int totalErrors = 0;
+        try (DirectoryStream<Path> dirStream = Files.newDirectoryStream(inDir, fileGlob)) {
+            for (Path inputFile : dirStream) {
+                String outName = toJsonOutputName(inputFile.getFileName().toString());
+                int[] result = converter.convertFile(inputFile, outDir.resolve(outName));
+                totalEntries += result[0];
+                totalErrors += result[1];
+                System.out.printf("  %s -> %s (%d entries)%n",
+                        inputFile.getFileName(), outName, result[0]);
+                filesConverted++;
+            }
+        }
+        if (filesConverted == 0) {
+            System.out.println("No files matched: " + inGlob);
+            return;
+        }
+        System.out.printf("%nConverted %d file(s), %d entries total", filesConverted, totalEntries);
+        if (totalErrors > 0) {
+            System.out.printf(", %d parse errors (check logs for details)", totalErrors);
+        }
+        System.out.println();
+    }
+
+    private static void printUsage() {
+        System.err.println("Usage: DiagnosticsLogConverter --in=<glob> [--out=<dir>]");
+        System.err.println("  --in   glob pattern for STANDARD-format diagnostics files");
+        System.err.println("  --out  output directory (default: same as input directory)");
+    }
+
+    /**
+     * Converts one STANDARD-format diagnostics log file to NDJSON, writing the result
+     * to {@code outputFile} (one JSON object per line).
+     *
+     * @return {@code int[2]}: {@code [0]} = entries converted, {@code [1]} = parse errors
+     */
+    int[] convertFile(Path inputFile, Path outputFile) throws IOException {
+        List<String> entries = splitIntoEntries(inputFile);
+        int converted = 0;
+        int errors = 0;
+        try (BufferedWriter writer = Files.newBufferedWriter(outputFile, StandardCharsets.UTF_8)) {
+            for (String entry : entries) {
+                if (entry.isBlank()) {
+                    continue;
+                }
+                DiagnosticEntry parsed = parseStandard(entry);
+                if (parsed == null) {
+                    errors++;
+                    continue;
+                }
+                writer.write(toJson(parsed));
+                writer.newLine();
+                converted++;
+            }
+        }
+        return new int[]{converted, errors};
+    }
+
+    /**
+     * Reads a STANDARD-format diagnostics log file and returns the individual entry blocks.
+     * Each block starts with a {@code dd-MM-yyyy HH:mm:ss} header line.
+     */
+    private static List<String> splitIntoEntries(Path file) throws IOException {
+        List<String> entries = new ArrayList<>();
+        List<String> current = new ArrayList<>();
+        try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (ENTRY_HEADER_PATTERN.matcher(line).matches()) {
+                    if (!current.isEmpty()) {
+                        entries.add(joinEntryLines(current));
+                        current.clear();
+                    }
+                    current.add(line);
+                } else if (!current.isEmpty()) {
+                    current.add(line);
+                }
+            }
+        }
+        if (!current.isEmpty()) {
+            entries.add(joinEntryLines(current));
+        }
+        return entries;
+    }
+
+    private static String joinEntryLines(List<String> lines) {
+        int last = lines.size() - 1;
+        while (last > 0 && lines.get(last).isBlank()) {
+            last--;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i <= last; i++) {
+            sb.append(lines.get(i)).append(System.lineSeparator());
+        }
+        return sb.toString();
+    }
+
+    private static String toJsonOutputName(String fileName) {
+        int dot = fileName.lastIndexOf('.');
+        if (dot > 0) {
+            return fileName.substring(0, dot) + ".jsonl";
+        }
+        return fileName + ".jsonl";
     }
 }
