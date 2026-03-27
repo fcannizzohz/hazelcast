@@ -42,23 +42,20 @@ file line-by-line (NDJSON style).
 
 ```typescript
 interface DiagnosticsLine {
-  time:   string;   // always present; format: "dd-MM-yyyy HH:mm:ss" in JVM system timezone
-  epoch:  number;   // always present in JSON writer output (milliseconds since Unix epoch);
-                    // absent only in DiagnosticsLogConverter output when source STANDARD had no epoch
+  epoch:  number;   // always present; milliseconds since Unix epoch
   name:   string;   // message-type discriminator; see table below
   content: object;  // plugin-specific payload; always an object, never null
 }
 ```
 
-**`time` format:** `DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm:ss")` in
-`ZoneId.systemDefault()`. This is **day-first, not ISO 8601**. A timestamp such
-as `"19-03-2026 14:05:00"` means 19 March 2026 14:05:00 in the JVM's local
-timezone. Parsers that need UTC must also consume `epoch`.
+**`epoch` presence:** Always emitted. The JSON writer emits it directly;
+`DiagnosticsLogConverter` derives it from the STANDARD header timestamp when the
+source log was written without epoch (second precision, millis always `000`).
 
-**`epoch` presence:** The JSON writer always emits `epoch` regardless of the
-`includeEpochTime` setting (which only controls the STANDARD format). The only
-case where `epoch` may be absent is when `DiagnosticsLogConverter` converts a
-STANDARD log that was originally written without epoch.
+**No `time` field:** A human-readable timestamp is intentionally omitted.
+It would be redundant with `epoch`, and the STANDARD format uses a non-ISO
+day-first format (`dd-MM-yyyy HH:mm:ss`) tied to the JVM timezone — all of
+which make `time` a strictly worse timestamp source. Use `epoch` directly.
 
 ### `name` discriminator table
 
@@ -182,7 +179,7 @@ interface BuildInfoContent {
 ```
 
 ```json
-{"time":"19-03-2026 12:00:00","name":"BuildInfo","content":{
+{"epoch":1742385600000,"name":"BuildInfo","content":{
   "Build":"20260319",
   "BuildNumber":20260319,
   "Revision":"abc1234",
@@ -205,7 +202,7 @@ interface ConfigPropertiesContent {
 ```
 
 ```json
-{"time":"19-03-2026 12:00:00","name":"ConfigProperties","content":{
+{"epoch":1742385600000,"name":"ConfigProperties","content":{
   "hazelcast.operation.call.timeout.millis":"60000",
   "hazelcast.slow.operation.detector.enabled":"true"
 }}
@@ -224,7 +221,7 @@ interface SystemPropertiesContent {
 ```
 
 ```json
-{"time":"19-03-2026 12:00:00","name":"SystemProperties","content":{
+{"epoch":1742385600000,"name":"SystemProperties","content":{
   "java.version":"21.0.2",
   "os.name":"Linux",
   "user.timezone":"UTC"
@@ -254,10 +251,10 @@ interface MetricContent {
 ```
 
 ```json
-{"time":"19-03-2026 12:00:00","epoch":1710849600000,"name":"Metric","content":{"jvm.memory.heap.used(bytes)":1048576}}
-{"time":"19-03-2026 12:00:00","epoch":1710849600000,"name":"Metric","content":{"jvm.memory.heap.used(percent)":68.4}}
-{"time":"19-03-2026 12:00:00","epoch":1710849600000,"name":"Metric","content":{"os.cpu.load":"NA"}}
-{"time":"19-03-2026 12:00:00","epoch":1710849600000,"name":"Metric","content":{"map.size[instance=myMap]":42}}
+{"epoch":1710849600000,"name":"Metric","content":{"jvm.memory.heap.used(bytes)":1048576}}
+{"epoch":1710849600000,"name":"Metric","content":{"jvm.memory.heap.used(percent)":68.4}}
+{"epoch":1710849600000,"name":"Metric","content":{"os.cpu.load":"NA"}}
+{"epoch":1710849600000,"name":"Metric","content":{"map.size[instance=myMap]":42}}
 ```
 
 > **Parser note:** All lines in a single metrics collection share the same
@@ -293,7 +290,7 @@ interface SampleEntry {
 ```
 
 ```json
-{"time":"19-03-2026 12:00:00","name":"EventQueues","content":{
+{"epoch":1742385600000,"name":"EventQueues","content":{
   "worker=1": {
     "eventCount": 1500,
     "sampleCount": 100,
@@ -328,7 +325,7 @@ interface InvocationEntry {
 ```
 
 ```json
-{"time":"19-03-2026 12:00:00","name":"PendingInvocations","content":{
+{"epoch":1742385600000,"name":"PendingInvocations","content":{
   "count": 3,
   "invocations": {
     "entries": [
@@ -372,7 +369,7 @@ interface InvocationEntry {
 ```
 
 ```json
-{"time":"19-03-2026 12:00:00","name":"SlowOperations","content":{
+{"epoch":1742385600000,"name":"SlowOperations","content":{
   "com.hazelcast.map.impl.operation.PutOperation": {
     "invocations": 2,
     "stackTrace": {
@@ -417,7 +414,7 @@ interface LifecycleEntry {
 ```
 
 ```json
-{"time":"19-03-2026 12:00:00","name":"Lifecycle","content":{"entries":[{"state":"STARTED"}]}}
+{"epoch":1742385600000,"name":"Lifecycle","content":{"entries":[{"state":"STARTED"}]}}
 ```
 
 #### MemberAdded / MemberRemoved
@@ -439,7 +436,7 @@ interface MemberEntry {
 ```
 
 ```json
-{"time":"19-03-2026 12:00:00","name":"MemberAdded","content":{
+{"epoch":1742385600000,"name":"MemberAdded","content":{
   "member": "192.168.1.11:5701",
   "Members": {
     "entries": [
@@ -480,7 +477,7 @@ interface ExceptionEntry {
 ```
 
 ```json
-{"time":"19-03-2026 12:00:00","epoch":1710849600000,"name":"ConnectionRemoved","content":{"entries":[{"connection":"Connection[192.168.1.11:5701->192.168.1.10:5701]"}],"type":"MEMBER","isAlive":false,"closeReason":"Connection closed by peer","CloseCause":{"entries":[{"exceptionClass":"java.io.EOFException","message":"Connection reset"},{"text":"at java.io.DataInputStream.readFully(DataInputStream.java:197)"},{"text":"at com.hazelcast.internal.nio.IOUtil.readFully(IOUtil.java:88)"}]}}}
+{"epoch":1710849600000,"name":"ConnectionRemoved","content":{"entries":[{"connection":"Connection[192.168.1.11:5701->192.168.1.10:5701]"}],"type":"MEMBER","isAlive":false,"closeReason":"Connection closed by peer","CloseCause":{"entries":[{"exceptionClass":"java.io.EOFException","message":"Connection reset"},{"text":"at java.io.DataInputStream.readFully(DataInputStream.java:197)"},{"text":"at com.hazelcast.internal.nio.IOUtil.readFully(IOUtil.java:88)"}]}}}
 ```
 
 #### ClusterVersionChanged
@@ -497,7 +494,7 @@ interface VersionEntry {
 ```
 
 ```json
-{"time":"19-03-2026 12:00:00","name":"ClusterVersionChanged","content":{"entries":[{"version":"5.6"}]}}
+{"epoch":1742385600000,"name":"ClusterVersionChanged","content":{"entries":[{"version":"5.6"}]}}
 ```
 
 #### MigrationState
@@ -515,7 +512,7 @@ interface MigrationStateContent {
 ```
 
 ```json
-{"time":"19-03-2026 12:00:00","name":"MigrationState","content":{
+{"epoch":1742385600000,"name":"MigrationState","content":{
   "startTime": "19-03-2026 12:00:00",
   "plannedMigrations": 271,
   "completedMigrations": 10,
@@ -543,7 +540,7 @@ interface ReplicaMigrationContent {
 ```
 
 ```json
-{"time":"19-03-2026 12:00:00","name":"MigrationCompleted","content":{
+{"epoch":1742385600000,"name":"MigrationCompleted","content":{
   "source": "192.168.1.10:5701",
   "destination": "192.168.1.11:5701",
   "partitionId": 42,
@@ -579,7 +576,7 @@ interface MemberHeartbeatEntry {
 ```
 
 ```json
-{"time":"19-03-2026 12:00:00","name":"OperationHeartbeat","content":{
+{"epoch":1742385600000,"name":"OperationHeartbeat","content":{
   "member192.168.1.11:5701": {
     "deviation(%)": 66.66667,
     "noHeartbeat(ms)": 25000,
@@ -614,7 +611,7 @@ interface MemberHeartbeatEntry {
 Same shape as `OperationHeartbeat`; different data source and threshold.
 
 ```json
-{"time":"19-03-2026 12:00:00","name":"MemberHeartbeats","content":{
+{"epoch":1742385600000,"name":"MemberHeartbeats","content":{
   "member192.168.1.11:5701": {
     "deviation(%)": 120.0,
     "noHeartbeat(ms)": 11000,
@@ -655,7 +652,7 @@ interface ThreadEntry {
 ```
 
 ```json
-{"time":"19-03-2026 12:00:00","name":"NetworkingImbalance","content":{
+{"epoch":1742385600000,"name":"NetworkingImbalance","content":{
   "InputThreads": {
     "hz.thread.io.in.0": {
       "frames-percentage": 60.0, "frames": 600,
@@ -708,7 +705,7 @@ interface SampleEntry {
 > a single `"connection"` array so duplicate keys are impossible.
 
 ```json
-{"time":"19-03-2026 12:00:00","epoch":1710849600000,"name":"OverloadedConnections","content":{"connection":[{"from":"/192.168.1.10:5701","to":"/192.168.1.11:5701","packetCount":15000,"sampleCount":950,"samples":{"entries":[{"connectionType":"com.hazelcast.map.impl.operation.PutOperation","sampleCount":700,"percentage":0.736},{"connectionType":"com.hazelcast.map.impl.operation.GetOperation","sampleCount":250,"percentage":0.263}]}},{"from":"/192.168.1.10:5701","to":"/192.168.1.11:5701","urgentPacketCount":200,"sampleCount":50,"samples":{}}]}}
+{"epoch":1710849600000,"name":"OverloadedConnections","content":{"connection":[{"from":"/192.168.1.10:5701","to":"/192.168.1.11:5701","packetCount":15000,"sampleCount":950,"samples":{"entries":[{"connectionType":"com.hazelcast.map.impl.operation.PutOperation","sampleCount":700,"percentage":0.736},{"connectionType":"com.hazelcast.map.impl.operation.GetOperation","sampleCount":250,"percentage":0.263}]}},{"from":"/192.168.1.10:5701","to":"/192.168.1.11:5701","urgentPacketCount":200,"sampleCount":50,"samples":{}}]}}
 ```
 
 ---
@@ -740,7 +737,7 @@ interface MethodEntry {
 ```
 
 ```json
-{"time":"19-03-2026 12:00:00","name":"MapService","content":{
+{"epoch":1742385600000,"name":"MapService","content":{
   "employees": {
     "load": {
       "count": 100,
@@ -789,7 +786,7 @@ interface LatencyEntry {
 ```
 
 ```json
-{"time":"19-03-2026 12:00:00","name":"OperationsProfiler","content":{
+{"epoch":1742385600000,"name":"OperationsProfiler","content":{
   "com.hazelcast.map.impl.operation.PutOperation": {
     "count": 500,
     "totalTime(us)": 12500,
@@ -837,7 +834,7 @@ interface SampleEntry {
 ```
 
 ```json
-{"time":"19-03-2026 12:00:00","name":"OperationThreadSamples","content":{
+{"epoch":1742385600000,"name":"OperationThreadSamples","content":{
   "Partition": {
     "entries": [
       { "operation": "com.hazelcast.map.impl.operation.PutOperation", "samples": 12, "percentage": 60.0 },
@@ -878,7 +875,7 @@ interface MemberAddressEntry {
 ```
 
 ```json
-{"time":"19-03-2026 12:00:00","name":"HazelcastInstance","content":{
+{"epoch":1742385600000,"name":"HazelcastInstance","content":{
   "thisAddress": "192.168.1.10:5701",
   "isRunning": true,
   "isLite": false,
@@ -928,11 +925,11 @@ interface SampleEntry {
 ```
 
 ```json
-{"time":"19-03-2026 12:00:00","epoch":1710849600000,"name":"Invocations","content":{"Pending":{"entries":[{"description":"BasicInvocation{op=PutOperation, ...}","duration":12000,"unit":"ms"},{"text":"max number of invocations to print reached."}]},"History":{"entries":[{"operation":"com.hazelcast.map.impl.operation.PutOperation","samples":50}]},"SlowHistory":{"entries":[{"operation":"com.hazelcast.map.impl.operation.PutOperation","samples":2}]}}}
+{"epoch":1710849600000,"name":"Invocations","content":{"Pending":{"entries":[{"description":"BasicInvocation{op=PutOperation, ...}","duration":12000,"unit":"ms"},{"text":"max number of invocations to print reached."}]},"History":{"entries":[{"operation":"com.hazelcast.map.impl.operation.PutOperation","samples":50}]},"SlowHistory":{"entries":[{"operation":"com.hazelcast.map.impl.operation.PutOperation","samples":2}]}}}
 ```
 
 <!-- expanded for reference:
-{"time":"19-03-2026 12:00:00","epoch":1710849600000,"name":"Invocations","content":{
+{"epoch":1710849600000,"name":"Invocations","content":{
   "Pending": {
     "entries": [
       { "description": "BasicInvocation{op=PutOperation, ...}", "duration": 12000, "unit": "ms" },
@@ -1013,3 +1010,522 @@ first entry (exception class + message) is a structured object with
 `startTime` is written with `writeKeyValueEntryAsDateTime` unconditionally in
 both formats, producing a `"dd-MM-yyyy HH:mm:ss"` string. No epoch value is
 available from `MigrationState.getStartTime()`.
+
+---
+
+## Design rationale and change history
+
+This section documents the design decisions taken when adding JSON output
+support, and explains why the choices were made the way they were — particularly
+with respect to backward compatibility, log ingestion tooling, and the
+[`DiagnosticsLogConverter`](#diagnosticslogconverter).
+
+### Context: what existed before
+
+Hazelcast diagnostics originally produced a single format — referred to here as
+STANDARD — which is a line-oriented, human-readable text format. Each plugin
+execution produces a multi-line block structured as nested `key[value]` sections:
+
+```
+19-03-2026 14:30:00 BuildInfo[
+                          Build=20260319
+                          BuildNumber=20,260,319
+                          Revision=abc1234
+                          ...
+                        ]
+```
+
+This format is easy to read in a terminal but difficult to ingest with log
+aggregators: it cannot be parsed without a custom multi-line combiner rule, keys
+with spaces or special characters require escaping, numbers are formatted for
+humans (comma grouping), and there is no stable field schema.
+
+### Objective
+
+Provide a machine-readable output mode that:
+
+1. Requires no changes to existing deployments using STANDARD format.
+2. Produces output directly consumable by Loki, Elasticsearch/OpenSearch,
+   Splunk, and any other tool that understands NDJSON.
+3. Preserves all information that the STANDARD format carries.
+4. Allows existing STANDARD log files to be converted to JSON retroactively.
+
+### Decision 1 — opt-in via a new enum, default unchanged
+
+A new `DiagnosticsLogFormat` enum (`STANDARD` | `JSON`) was introduced. The
+default is `STANDARD`. Existing deployments are unaffected: nothing in the
+startup path changes unless the operator explicitly sets the format.
+
+Configuration is exposed in two ways so both users of the programmatic API
+and the legacy property-based configuration can use it:
+
+```java
+// programmatic
+config.getDiagnosticsConfig().setLogFormat(DiagnosticsLogFormat.JSON);
+
+// system property (legacy)
+hazelcast.diagnostics.format=JSON
+```
+
+`DiagnosticsConfig` stores the field and serializes it via
+`IdentifiedDataSerializable`, so the setting is propagated correctly in a
+clustered environment where the config is distributed.
+
+### Decision 2 — extend the writer interface with default methods only
+
+The pre-existing `DiagnosticsLogWriter` interface is implemented by every plugin
+and by test stubs throughout the codebase. Adding abstract methods would have
+required updating every implementation. Instead, all new capabilities were added
+as `default` methods:
+
+| New default method | Purpose |
+|---|---|
+| `getFormat()` | returns `STANDARD`; JSON writer overrides to return `JSON` |
+| `writeStructuredEntry(Object... kvPairs)` | emits a key/value object into the `entries` array; falls back to `writeEntry("k=v ...")` on STANDARD |
+| `startArrayItemSection(String key)` / `endArrayItemSection()` | opens/closes a named-array item; delegates to `startSection`/`endSection` on STANDARD |
+| `startSection(String name, long timeMillis)` | timestamped section for `MetricsPlugin`; delegates to `startSection(name)` on STANDARD |
+
+This means the STANDARD writer (`DiagnosticsLogWriterImpl`), all existing test
+doubles, and all plugins that do not need format-specific behaviour required
+**zero changes**. Backward compatibility is structurally guaranteed by the
+compiler: a class that already compiles against the old interface will compile
+and run correctly against the new one.
+
+### Decision 3 — format-aware branching at call sites, not inside the writer
+
+Some plugins produce human-formatted data (comma-grouped numbers, `%`-suffixed
+strings, redundant date-time copies of already-present epoch values) that is
+readable in STANDARD output but meaningless noise in JSON. Rather than trying
+to detect and strip these inside the writer, the affected plugins branch on
+`writer.getFormat()` at the relevant call sites. The STANDARD path is
+byte-for-byte unchanged; the JSON path emits clean typed values.
+
+This is an acknowledged design trade-off: the plugins gain a format awareness
+they did not have before, but the alternative — a writer that silently discards
+or transforms data depending on format — would be harder to reason about and
+harder to test.
+
+### Decision 4 — `epoch` always present in JSON output
+
+The pre-existing `includeEpochTime` flag controls whether STANDARD output
+includes the millisecond epoch in the header line. This flag was deliberately
+not honoured in JSON mode. Reasons:
+
+- Log aggregators require a machine-precision UTC timestamp to order and
+  deduplicate events. `epoch` is timezone-independent and millisecond-precise.
+- Making `epoch` optional in JSON output would produce schema-incompliant
+  records whenever a user had previously disabled epoch in STANDARD config
+  and then switched to JSON without noticing the interaction.
+- The `includeEpochTime` constructor parameter is still accepted by
+  `DiagnosticsLogWriterJsonImpl` for API compatibility, but is silently
+  ignored.
+
+### Decision 5 — `entries` items are always JSON objects
+
+In STANDARD format, `writeEntry(String)` appends a raw string to the current
+section. In a naïve JSON translation this would produce `"entries":["value"]`
+— a mixed array where some items are strings and others (from
+`writeStructuredEntry`) are objects. This would require every consumer to
+implement type-checking per array element.
+
+Instead, plain strings are wrapped as `{"text":"<value>"}`, making the rule
+uniform: **every item in every `entries` array is a JSON object**. Consumers
+can unconditionally apply object field extraction on array elements. The `text`
+key is a stable sentinel that distinguishes wrapped plain text from structured
+entries.
+
+### Decision 6 — compact JSON (no whitespace)
+
+JSON output contains no spaces between tokens. Each plugin execution produces
+exactly one line. This is a deliberate optimisation for log ingestion:
+
+- Line-oriented readers (Promtail, Fluentd, Filebeat) split on newline. A
+  single self-contained JSON object per line means no multi-line combiner
+  rules are needed.
+- Whitespace in JSON adds bytes but carries no information for machine
+  consumers.
+- Smaller lines mean more events per I/O page and lower network cost when
+  shipping logs.
+
+### Decision 7 — human-readable metric key format
+
+`MetricsPlugin` originally wrote the internal `MetricDescriptor.metricString()`
+representation as the JSON key. That representation is:
+
+```
+[metric=jvm.memory.heap.used,unit=bytes,...]
+```
+
+This is machine-parseable but not query-friendly: square brackets and commas in
+key names require escaping in most query languages, and the format is not
+documented as stable API. For JSON mode a new key format was introduced:
+
+```
+[prefix.]metric[discriminator=value][tag=value]*(unit)
+```
+
+Examples: `jvm.memory.heap.used(bytes)`, `map.size[instance=myMap]`,
+`os.cpu.load`.
+
+This format can be used directly as a Prometheus/Grafana label pattern or as a
+LogQL field name. The old `metricString()` format is preserved for STANDARD
+output and is not changed.
+
+### Decision 8 — `OverloadedConnections` uses a named array
+
+In STANDARD format `OverloadedConnectionsPlugin` writes each overloaded
+connection as a subsection keyed by `connection.toString()`. When the same
+connection has both a normal and a priority queue above threshold, the same key
+appears twice — valid in the STANDARD line format (it is not a key-value store)
+but illegal in JSON (duplicate object keys).
+
+The JSON path uses a `"connection": [...]` array via the new
+`startArrayItemSection`/`endArrayItemSection` API. This eliminates duplicate
+keys while keeping the same information. The STANDARD path is unchanged.
+
+---
+
+## DiagnosticsLogConverter
+
+`DiagnosticsLogConverter` is a utility class that translates between the two
+formats. It is **not** used in the hot path during normal cluster operation; its
+role is offline conversion and tooling integration.
+
+### STANDARD → JSON (`parseStandard` + `toJson`)
+
+`parseStandard` parses a STANDARD-format multi-line block into an intermediate
+`DiagnosticEntry` POJO. `toJson` serializes that POJO to a compact JSON string
+following the same schema as live JSON writer output.
+
+**Epoch derivation.** If the source STANDARD entry was written without
+`includeEpochTime=true`, the epoch field is absent from the header. Rather than
+emitting schema-incompliant JSON with a missing `epoch`, the converter derives
+the epoch from the STANDARD header timestamp by parsing `dd-MM-yyyy HH:mm:ss`
+against the JVM default timezone. The derived value has millisecond precision
+of `000` (second-boundary), which is the best that can be done without the
+original millisecond value. The result is always schema-compliant.
+
+### JSON → STANDARD (`parseJson` + `toStandard`)
+
+`parseJson` reads a compact JSON line back into a `DiagnosticEntry`. Because
+JSON output no longer carries a `time` field, `parseJson` derives the `time`
+string from `epoch` (formatting it as `dd-MM-yyyy HH:mm:ss` in the JVM default
+timezone) so that `toStandard` can reconstruct a valid STANDARD header.
+`toStandard` then rebuilds the multi-line block with comma-grouped numbers,
+escaped special characters, and the correct indent depth. Round-trips are fully
+lossless for all data in the `content` object.
+
+### Use cases
+
+| Scenario | How to use |
+|---|---|
+| Migrate existing STANDARD log files to JSON for ingestion | `parseStandard` each block → `toJson` → write lines to new file |
+| Convert live JSON stream back to STANDARD for human inspection | `parseJson` each line → `toStandard` → write blocks to file |
+| Validate that a JSON output is schema-compliant | validate each line against `diaglogs.schema.json` |
+| Feed historical logs into a tool that only accepts NDJSON | convert with the STANDARD→JSON path, then ship |
+
+---
+
+## Log ingestion with Loki and Grafana
+
+The JSON output format was designed with Loki (and compatible push-model
+aggregators) as a primary target. This section shows a concrete integration.
+
+### Why this schema suits log aggregation
+
+Three properties make the output directly ingestible:
+
+1. **One JSON object per line (NDJSON).** Loki, Fluentd, Filebeat, and
+   Promtail all work natively with newline-delimited JSON. No multi-line
+   combiner rules, no custom parsers for nested indented blocks.
+
+2. **`epoch` is always present and is a Unix millisecond integer.** Loki
+   requires a monotonically increasing timestamp per stream. The `epoch` field
+   maps directly to Loki's timestamp with no parsing or timezone conversion.
+   There is no separate human-readable timestamp field — `epoch` is the single
+   source of truth, and Loki / Grafana can display it in any timezone.
+
+3. **`name` is a stable low-cardinality discriminator.** There are roughly 25
+   known `name` values (one per plugin/event type). Using `name` as a Loki
+   stream label keeps cardinality bounded and enables efficient stream
+   selection: `{job="hazelcast", name="SlowOperations"}`.
+
+### Promtail / Grafana Alloy pipeline
+
+The following Promtail `scrape_configs` snippet tails a diagnostics log file
+and ships it to Loki with correct timestamps and labels:
+
+```yaml
+scrape_configs:
+  - job_name: hazelcast_diagnostics
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: hazelcast
+          host: __hostname__
+          __path__: /var/log/hazelcast/diagnostics*.log
+
+    pipeline_stages:
+      # 1. Parse the JSON line into fields
+      - json:
+          expressions:
+            epoch:   epoch
+            name:    name
+            time:    time
+
+      # 2. Use epoch (Unix ms) as the Loki timestamp — precise and timezone-free
+      - timestamp:
+          source: epoch
+          format: UnixMs
+
+      # 3. Promote 'name' to a stream label for efficient log stream selection
+      - labels:
+          name:
+
+      # 4. Drop the redundant 'time' field from the log line (optional)
+      - labeldrop:
+          - time
+```
+
+With Grafana Alloy replace the `scrape_configs` block with the equivalent
+`loki.source.file` / `loki.process` River pipeline:
+
+```hcl
+loki.source.file "hazelcast_diagnostics" {
+  targets = [{__path__ = "/var/log/hazelcast/diagnostics*.log", job = "hazelcast"}]
+  forward_to = [loki.process.diag.receiver]
+}
+
+loki.process "diag" {
+  forward_to = [loki.write.default.receiver]
+
+  stage.json {
+    expressions = {epoch = "epoch", name = "name"}
+  }
+  stage.timestamp {
+    source = "epoch"
+    format = "UnixMs"
+  }
+  stage.labels {
+    values = {name = ""}
+  }
+}
+```
+
+### Example Grafana LogQL queries
+
+Once the pipeline is in place, these LogQL expressions cover the most common
+diagnostics use cases:
+
+```logql
+# All slow operations in the last hour
+{job="hazelcast", name="SlowOperations"}
+
+# Heap memory usage over time (MetricsPlugin)
+{job="hazelcast", name="Metric"}
+  | json
+  | label_format metric=`content_jvm_memory_heap_used_bytes`
+
+# JVM heap used, extracted as a metric for a time-series panel
+sum by (host) (
+  last_over_time(
+    {job="hazelcast", name="Metric"}
+      | json
+      | unwrap content_jvm_memory_heap_used_bytes [1m]
+  )
+)
+
+# All connection removals that had a close cause
+{job="hazelcast", name="ConnectionRemoved"}
+  | json
+  | content_CloseCause != ""
+
+# Overloaded connections with more than 10 000 packets
+{job="hazelcast", name="OverloadedConnections"}
+  | json
+  | line_format `{{.content}}`
+
+# Member added/removed events for a cluster topology view
+{job="hazelcast", name=~"MemberAdded|MemberRemoved"}
+```
+
+> **Field naming in LogQL.** Loki's `| json` stage extracts nested JSON fields
+> using underscore-joined paths. `content.jvm.memory.heap.used(bytes)` becomes
+> `content_jvm_memory_heap_used_bytes_` (parentheses and dots are replaced with
+> underscores). Use `line_format` or `label_format` to handle these names
+> programmatically if the exact key name varies.
+
+---
+
+## Performance
+
+### Execution model — why absolute overhead is bounded
+
+Before comparing the two formats, it is important to understand *when*
+diagnostics code runs. Every plugin executes on a dedicated background scheduler
+thread (`ScheduledExecutorService`), not on any partition, operation, or I/O
+thread. A plugin's `run()` method is called periodically — typically every 1–60
+seconds depending on plugin configuration — and writes to a buffered
+`PrintWriter` backed by the diagnostics log file. **No diagnostic write ever
+appears on the hot path of a Hazelcast operation.**
+
+This means that even a measurable overhead in the writer (say, 50 µs more per
+plugin execution) is completely invisible to application latency. The section
+below analyses the differences anyway, because they are relevant to very
+high-frequency plugins (`MetricsPlugin` can fire thousands of times per second
+when the metric registry is large) and to the integrity of the STANDARD format
+guarantee.
+
+---
+
+### Impact on STANDARD format (the guarantee: zero regression)
+
+The implementation deliberately introduces no changes to the STANDARD code path.
+`DiagnosticsLogWriterImpl` is an unmodified class — no methods were altered,
+removed, or wrapped. The only additions to the codebase that touch the STANDARD
+path are:
+
+1. **New interface default methods** (`getFormat`, `writeStructuredEntry`,
+   `startArrayItemSection`, `endArrayItemSection`). Default methods have no
+   overhead when the concrete type overrides them, and `DiagnosticsLogWriterImpl`
+   overrides all of them. A call to `writer.getFormat()` on a
+   `DiagnosticsLogWriterImpl` is a virtual dispatch to the concrete override that
+   returns the constant `DiagnosticsLogFormat.STANDARD` — a single-field load.
+
+2. **`getFormat() == JSON` branches in plugins** (approximately 20 call sites).
+   In STANDARD mode the `writer` reference always points to a
+   `DiagnosticsLogWriterImpl` instance. After the JVM warms up (typically a few
+   hundred invocations), the C2 JIT compiler:
+
+   - **Devirtualizes** `getFormat()` at each call site because the call site is
+     *monomorphic* — only one concrete type (`DiagnosticsLogWriterImpl`) has
+     ever been observed there. C2 guards on the concrete type and inlines the
+     method body, replacing the virtual dispatch with a direct load of
+     `DiagnosticsLogFormat.STANDARD`.
+   - **Folds the branch** `if (STANDARD == JSON)` to compile-time `false`
+     because both sides of the comparison are now compile-time constants in the
+     inlined body.
+   - **Dead-code-eliminates** the JSON branch entirely, producing native code
+     identical to what the plugin would have generated if the branch had never
+     been written.
+
+   The net result: after JIT warm-up, STANDARD-mode plugins run the same native
+   instruction sequence as before. The branches exist in bytecode but not in the
+   compiled machine code.
+
+3. **Format check in MetricsPlugin** — `MetricsPlugin` calls `getFormat()` once
+   per metric collected. With a large metric registry this call executes very
+   frequently. The monomorphic-devirtualization argument above applies fully: in
+   STANDARD mode it compiles to a single compare-and-branch instruction that is
+   always predicted taken (never entering the JSON path) and eventually
+   eliminated by the compiler as unreachable.
+
+**Summary:** switching from the baseline to the current code with
+`DiagnosticsLogFormat.STANDARD` (the default) produces no measurable change in
+diagnostics throughput or application latency.
+
+---
+
+### JSON format vs STANDARD: concrete differences
+
+When `DiagnosticsLogFormat.JSON` is configured, the writer in use is
+`DiagnosticsLogWriterJsonImpl`. The two implementations share the same
+zero-allocation philosophy in all hot-path write operations.
+
+#### String escaping
+
+Both writers use a character-by-character switch loop that writes directly to
+the `PrintWriter` with no intermediate `String` or buffer. No allocation occurs
+regardless of whether the input contains special characters.
+
+`DiagnosticsLogWriterImpl.writeEscaped` escapes `\`, `[`, `]`, `=`, `\n`, `\r`.
+`DiagnosticsLogWriterJsonImpl.printEscaped` escapes `"`, `\`, `\b`, `\f`, `\n`,
+`\r`, `\t` — the standard JSON set.
+
+#### Long integer formatting
+
+Both writers use a hand-coded digit-extraction loop into a pre-allocated
+`char[]` field, then flush the buffer in a single `PrintWriter.write(char[], int, int)`
+call. No `String` object is created.
+
+`DiagnosticsLogWriterImpl.writeLong` adds comma grouping (`1,048,576`) for
+human readability. `DiagnosticsLogWriterJsonImpl.printLong` omits it, producing
+plain decimal (`1048576`) as required by JSON. The JSON variant is therefore
+slightly simpler and marginally faster.
+
+#### Timestamp formatting
+
+Both writers reuse a `Calendar` and `Date` pair as instance fields. The
+formatted timestamp is assembled into a pre-allocated `char[]` buffer and
+flushed in one write. No `String`, `Instant`, or formatter object is allocated.
+
+`DiagnosticsLogWriterImpl` writes digits individually via its `write(int)` →
+`StringBuilder` → `char[]` chain. `DiagnosticsLogWriterJsonImpl.printDateTime`
+precomputes all six fields (day, month, year, hour, minute, second) into
+`char[19]` and flushes the whole buffer in one call, avoiding the per-digit
+`StringBuilder` round-trip.
+
+#### Double formatting
+
+Neither writer has a zero-allocation path for `double` values — this is a JDK
+limitation; there is no public API before Java 21 for converting a `double` to
+decimal characters without allocating. Both writers use the same approach: a
+reused `StringBuilder` is appended to, its contents are copied into a reused
+`char[]` via `getChars`, and the buffer is flushed. One `StringBuilder` internal
+buffer resize may occur if the formatted double is longer than the pre-allocated
+capacity, but this is rare and amortised.
+
+#### State management overhead
+
+The JSON writer maintains additional state that the STANDARD writer does not:
+`entryArrayOpen[]`, `namedArrayOpen[]`, `namedArrayKey[]` arrays and a
+`firstInSection` flag. These three arrays are each 8 elements (`MAX_SECTION_LEVELS`),
+fitting entirely in a single cache line. The extra branches in `writeKey()` and
+`writeEntry()` to check and update these flags are predictable (they follow the
+same pattern every time a section is entered and exited) and add only a handful
+of instructions per key written.
+
+#### Output volume
+
+For most plugins JSON output is comparable in byte count to STANDARD. The JSON
+format adds quote characters and colons but removes the 26-space indent prefix
+on every field line. For deeply nested output (e.g. `SlowOperations` with stack
+traces) the JSON output is often *smaller* than STANDARD because the indentation
+whitespace is eliminated. For `MetricsPlugin`, each JSON line is roughly:
+
+```
+{"epoch":1710849600000,"name":"Metric","content":{"jvm.memory.heap.used(bytes)":1048576}}
+```
+
+versus the STANDARD equivalent:
+
+```
+19-03-2026 12:00:00 Metric[
+                          jvm.memory.heap.used\=1,048,576]
+```
+
+The JSON line is longer per entry in this case due to the key/value repetition
+in the envelope, but it is a single line requiring no multi-line parser.
+
+---
+
+### Summary table
+
+| Aspect | STANDARD (`DiagnosticsLogWriterImpl`) | JSON (`DiagnosticsLogWriterJsonImpl`) |
+|---|---|---|
+| Hot-path impact | None — writer runs on scheduler thread | None — same |
+| STANDARD regression after this change | **Zero** — writer class unchanged; format branches devirtualized and dead-code-eliminated by C2 | N/A |
+| `getFormat()` branch cost (STANDARD, post-warm-up) | Eliminated by JIT (monomorphic devirtualization + constant folding) | Field return; minimal |
+| String escaping allocations | Zero — character-by-character switch, direct write | Zero — same approach, JSON escape set |
+| Long formatting allocations | Zero — hand-coded digit loop into reused `char[]` | Zero — same approach, no comma grouping |
+| Timestamp formatting | Zero-alloc — reused `Calendar`/`Date`, direct `char[]` write | Zero-alloc — same approach, single-call `char[19]` flush |
+| Double formatting | Low — reused `StringBuilder` + `char[]` flush | Low — same approach |
+| Extra state per write | None | Predictable boolean-array checks in `writeKey`/`writeEntry` |
+| Output size | Larger for flat sections (indentation whitespace) | Smaller for nested content; larger envelope overhead per `MetricsPlugin` line |
+
+The practical conclusion is: **JSON mode has the same allocation profile as
+STANDARD mode on the diagnostics scheduler thread** for all primitive and string
+values. The only remaining difference is the additional state-tracking branches
+in `writeKey`/`writeEntry` and the `double` formatting path, both of which are
+shared limitations. There is no remaining candidate for a targeted
+zero-allocation rewrite.

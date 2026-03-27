@@ -20,6 +20,7 @@ import com.hazelcast.logging.ILogger;
 import com.hazelcast.logging.Logger;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -122,6 +123,18 @@ public class DiagnosticsLogConverter {
             LOGGER.warning("Could not derive epoch from time string '" + time + "': " + e.getMessage());
             return 0L;
         }
+    }
+
+    /**
+     * Formats a Unix epoch millisecond value as a {@code "dd-MM-yyyy HH:mm:ss"} string
+     * in the JVM default timezone.  Used when reconstructing the STANDARD header from a
+     * JSON entry that does not carry a {@code "time"} field.
+     */
+    private static String formatEpochAsTime(long epochMillis) {
+        return LocalDateTime.ofInstant(
+                Instant.ofEpochMilli(epochMillis),
+                ZoneId.systemDefault()
+        ).format(TIME_FORMATTER);
     }
 
     private int parseContent(String[] lines, int lineIndex, Map<String, Object> content, int depth) {
@@ -344,10 +357,7 @@ public class DiagnosticsLogConverter {
 
     public String toJson(DiagnosticEntry entry) {
         StringBuilder sb = new StringBuilder();
-        sb.append("{\"time\":\"").append(entry.time).append("\"");
-        if (entry.epoch != null) {
-            sb.append(",\"epoch\":").append(entry.epoch);
-        }
+        sb.append("{\"epoch\":").append(entry.epoch != null ? entry.epoch : 0);
         sb.append(",\"name\":\"").append(escapeJson(entry.name)).append("\"");
         sb.append(",\"content\":");
         appendMapToJson(sb, entry.content);
@@ -440,10 +450,15 @@ public class DiagnosticsLogConverter {
         try {
             JsonNode root = new ObjectMapper().readTree(json);
             DiagnosticEntry entry = new DiagnosticEntry();
-            entry.time = root.get("time").asText();
+            JsonNode timeNode = root.get("time");
             JsonNode epochNode = root.get("epoch");
             if (epochNode != null && !epochNode.isNull()) {
                 entry.epoch = epochNode.longValue();
+            }
+            if (timeNode != null && !timeNode.isNull()) {
+                entry.time = timeNode.asText();
+            } else if (entry.epoch != null) {
+                entry.time = formatEpochAsTime(entry.epoch);
             }
             entry.name = root.get("name").asText();
             entry.content = jsonNodeToMap(root.get("content"));

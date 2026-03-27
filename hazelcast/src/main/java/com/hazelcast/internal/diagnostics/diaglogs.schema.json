@@ -5,19 +5,13 @@
   "description": "Schema for a single newline-terminated JSON object produced by Hazelcast Diagnostics when DiagnosticsLogFormat.JSON is configured. One object is emitted per plugin execution. Output is compact JSON with no whitespace between tokens.",
   "$comment": "Loki / Grafana ingestion: (1) use a Promtail/Alloy timestamp stage pointing at 'epoch' with format 'UnixMs'; (2) promote 'name' to a stream label so streams can be selected with {name=\"Metric\"} or {name=\"SlowOperations\"}; (3) parse remaining fields with the 'json' pipeline stage.",
   "type": "object",
-  "required": ["time", "epoch", "name", "content"],
+  "required": ["epoch", "name", "content"],
   "additionalProperties": false,
-  "$comment_required": "epoch is always present: DiagnosticsLogWriterJsonImpl emits it directly; DiagnosticsLogConverter derives it from the 'time' field (second precision, millis=000) when the source STANDARD log was written without epoch.",
+  "$comment_required": "epoch is always present: DiagnosticsLogWriterJsonImpl emits it directly; DiagnosticsLogConverter derives it from the 'time' field (second precision, millis=000) when the source STANDARD log was written without epoch. A human-readable 'time' field is intentionally absent — it is redundant with 'epoch' and uses a non-ISO day-first format tied to the JVM default timezone.",
   "properties": {
-    "time": {
-      "type": "string",
-      "description": "Wall-clock timestamp in the JVM default timezone, formatted as dd-MM-yyyy HH:mm:ss. Note: day-first, NOT ISO 8601. Parsers needing a timezone-independent timestamp must use 'epoch' instead.",
-      "pattern": "^\\d{2}-\\d{2}-\\d{4} \\d{2}:\\d{2}:\\d{2}$",
-      "examples": ["25-03-2026 14:30:00"]
-    },
     "epoch": {
       "type": "integer",
-      "description": "Unix epoch time in milliseconds. Always present: DiagnosticsLogWriterJsonImpl emits it directly; DiagnosticsLogConverter derives it from the 'time' field (second precision, millis=000) when the source STANDARD log had no epoch. Recommended timestamp source for Loki (configure as 'UnixMs' in Promtail/Alloy timestamp stage). All lines from a single MetricsPlugin collection share the same epoch value.",
+      "description": "Unix epoch time in milliseconds. Always present. DiagnosticsLogWriterJsonImpl emits it directly; DiagnosticsLogConverter derives it from the STANDARD header timestamp (second precision, millis=000) when the source log had no epoch. Use as the Loki timestamp (configure as 'UnixMs' in Promtail/Alloy timestamp stage). All lines from a single MetricsPlugin collection share the same epoch value.",
       "minimum": 0,
       "examples": [1711374600000]
     },

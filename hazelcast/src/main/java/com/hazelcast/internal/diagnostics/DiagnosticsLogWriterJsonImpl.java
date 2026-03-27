@@ -20,9 +20,10 @@ import com.hazelcast.logging.ILogger;
 import com.hazelcast.logging.Logger;
 
 import java.io.PrintWriter;
-import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.GregorianCalendar;
+import java.util.TimeZone;
 
 /**
  * A JSON implementation of the {@link DiagnosticsLogWriter}.
@@ -35,14 +36,34 @@ import java.time.format.DateTimeFormatter;
  * array is a JSON object.  Any subsequent {@link #writeKeyValueEntry} or nested
  * {@link #startSection} call automatically closes the open array first.
  *
- * <p>{@code "epoch"} (Unix epoch in milliseconds) is always emitted in the
- * envelope, regardless of the {@code includeEpochTime} constructor argument
- * (which is accepted for API compatibility but ignored in JSON mode).
+ * <p>The envelope contains {@code "epoch"} (Unix epoch in milliseconds) and
+ * {@code "name"} only; a human-readable {@code "time"} field is intentionally
+ * omitted because it is redundant with {@code "epoch"} and non-ISO.
+ * The {@code includeEpochTime} constructor argument is accepted for API
+ * compatibility but ignored in JSON mode.
+ *
+ * <p><b>Allocation profile:</b> all hot-path writes use pre-allocated buffers
+ * and write directly to the underlying {@link PrintWriter}.  Specifically:
+ * string escaping writes character-by-character (no intermediate {@code String}
+ * allocation even when escaping is needed), {@code long} values are formatted
+ * into a pre-allocated {@code char[]} buffer, {@code double} values reuse a
+ * pre-allocated {@code StringBuilder} + {@code char[]} pair, and the timestamp
+ * is built into a pre-allocated {@code char[19]} via a reused {@code Calendar}.
  */
 public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
 
-    private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm:ss")
-            .withZone(ZoneId.systemDefault());
+    // Lookup table for single-digit-to-char conversion; avoids repeated arithmetic.
+    private static final char[] DIGITS = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
+    private static final int DECIMAL_BASE = 10;
+
+    // "dd-MM-yyyy HH:mm:ss" = 19 characters
+    private static final int DATE_BUF_SIZE = 19;
+
+    // max digits in a long (19) + optional minus sign = 20
+    private static final int LONG_BUF_SIZE = 20;
+
+    // generous buffer for double-to-string conversion
+    private static final int NUM_BUF_SIZE = 32;
 
     /**
      * Maximum nesting depth supported. Matches the number of indent levels in
@@ -51,6 +72,19 @@ public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
     private static final int MAX_SECTION_LEVELS = 8;
 
     private final ILogger logger;
+
+    // --- zero-allocation timestamp support ---
+    // Reused per-instance; safe because the writer is driven by a single scheduler thread.
+    private final Calendar calendar = new GregorianCalendar(TimeZone.getDefault());
+    private final Date calDate = new Date();
+    private final char[] timeBuf = new char[DATE_BUF_SIZE];
+
+    // --- zero-allocation long formatting ---
+    private final char[] longBuf = new char[LONG_BUF_SIZE];
+
+    // --- low-allocation double formatting (reused StringBuilder + char[] flush) ---
+    private final StringBuilder numSb = new StringBuilder(NUM_BUF_SIZE);
+    private final char[] numChars = new char[NUM_BUF_SIZE];
 
     private PrintWriter printWriter;
     private int sectionLevel = -1;
@@ -107,13 +141,12 @@ public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
     }
 
     @Override
+    @SuppressWarnings("checkstyle:magicnumber")
     public void startSection(String name, long timeMillis) {
         if (sectionLevel == -1) {
-            printWriter.print("{\"time\":\"");
-            printWriter.print(DATE_TIME_FORMATTER.format(Instant.ofEpochMilli(timeMillis)));
-            // Change 1: epoch is always present in JSON format
-            printWriter.print("\",\"epoch\":");
-            printWriter.print(timeMillis);
+            // epoch is always present in JSON format; time is omitted (redundant given epoch)
+            printWriter.print("{\"epoch\":");
+            printLong(timeMillis);
             printWriter.print(",\"name\":\"");
             printWriter.print(name);
             printWriter.print("\",\"content\":{");
@@ -171,7 +204,7 @@ public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
         }
         openOrContinueEntryArray();
         printWriter.print("{\"text\":\"");
-        printWriter.print(escapeJson(s));
+        printEscaped(s);
         printWriter.print("\"}");
     }
 
@@ -179,20 +212,20 @@ public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
     public void writeKeyValueEntry(String key, String value) {
         writeKey(key);
         printWriter.print("\"");
-        printWriter.print(escapeJson(value));
+        printEscaped(value);
         printWriter.print("\"");
     }
 
     @Override
     public void writeKeyValueEntry(String key, double value) {
         writeKey(key);
-        printWriter.print(value);
+        printDouble(value);
     }
 
     @Override
     public void writeKeyValueEntry(String key, long value) {
         writeKey(key);
-        printWriter.print(value);
+        printLong(value);
     }
 
     @Override
@@ -205,7 +238,7 @@ public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
     public void writeKeyValueEntryAsDateTime(String key, long epochMillis) {
         writeKey(key);
         printWriter.print("\"");
-        printWriter.print(DATE_TIME_FORMATTER.format(Instant.ofEpochMilli(epochMillis)));
+        printDateTime(epochMillis);
         printWriter.print("\"");
     }
 
@@ -232,7 +265,7 @@ public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
                 printWriter.print(",");
             }
             printWriter.print("\"");
-            printWriter.print(escapeJson(String.valueOf(kvPairs[i])));
+            printEscaped(String.valueOf(kvPairs[i]));
             printWriter.print("\":");
             printJsonValue(kvPairs[i + 1]);
         }
@@ -257,7 +290,7 @@ public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
                 printWriter.print(",");
             }
             printWriter.print("\"");
-            printWriter.print(escapeJson(arrayKey));
+            printEscaped(arrayKey);
             printWriter.print("\":[");
             namedArrayOpen[sectionLevel] = true;
             namedArrayKey[sectionLevel] = arrayKey;
@@ -303,7 +336,7 @@ public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
             printWriter.print(",");
         }
         printWriter.print("\"");
-        printWriter.print(escapeJson(key));
+        printEscaped(key);
         printWriter.print("\":");
         firstInSection = false;
     }
@@ -323,16 +356,16 @@ public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
 
     private void printJsonValue(Object v) {
         if (v instanceof Long || v instanceof Integer) {
-            printWriter.print(((Number) v).longValue());
+            printLong(((Number) v).longValue());
         } else if (v instanceof Double || v instanceof Float) {
-            printWriter.print(((Number) v).doubleValue());
+            printDouble(((Number) v).doubleValue());
         } else if (v instanceof Boolean) {
             printWriter.print(v);
         } else if (v == null) {
             printWriter.print("null");
         } else {
             printWriter.print("\"");
-            printWriter.print(escapeJson(String.valueOf(v)));
+            printEscaped(String.valueOf(v));
             printWriter.print("\"");
         }
     }
@@ -352,16 +385,111 @@ public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
         }
     }
 
-    private static String escapeJson(String input) {
-        if (input == null) {
-            return "null";
+    /**
+     * Writes the JSON-escaped content of {@code s} directly to the underlying
+     * {@link PrintWriter}, one character at a time.  No intermediate {@code String}
+     * or buffer is allocated — the only allocation that can occur is inside
+     * {@link PrintWriter} itself (which uses its own internal lock and buffer).
+     * A {@code null} input writes the four characters {@code null} (unquoted).
+     */
+    private void printEscaped(String s) {
+        if (s == null) {
+            printWriter.print("null");
+            return;
         }
-        return input.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\b", "\\b")
-                .replace("\f", "\\f")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"':  printWriter.print("\\\""); break;
+                case '\\': printWriter.print("\\\\"); break;
+                case '\b': printWriter.print("\\b");  break;
+                case '\f': printWriter.print("\\f");  break;
+                case '\n': printWriter.print("\\n");  break;
+                case '\r': printWriter.print("\\r");  break;
+                case '\t': printWriter.print("\\t");  break;
+                default:   printWriter.write(c);      break;
+            }
+        }
+    }
+
+    /**
+     * Formats {@code value} as a decimal integer directly into a pre-allocated
+     * {@code char[]} buffer and writes it to the {@link PrintWriter} in a single
+     * {@code write(char[], int, int)} call.  No {@code String} object is created.
+     * Handles all {@code long} values including {@link Long#MIN_VALUE}.
+     */
+    private void printLong(long value) {
+        if (value == Long.MIN_VALUE) {
+            // Long.MIN_VALUE cannot be negated; use the pre-computed string constant.
+            printWriter.print(Long.MIN_VALUE);
+            return;
+        }
+        boolean negative = value < 0;
+        if (negative) {
+            value = -value;
+        }
+        int pos = LONG_BUF_SIZE;
+        do {
+            longBuf[--pos] = DIGITS[(int) (value % DECIMAL_BASE)];
+            value /= DECIMAL_BASE;
+        } while (value > 0);
+        if (negative) {
+            longBuf[--pos] = '-';
+        }
+        printWriter.write(longBuf, pos, LONG_BUF_SIZE - pos);
+    }
+
+    /**
+     * Formats {@code value} as a decimal floating-point number using a reused
+     * {@link StringBuilder} / {@code char[]} pair to avoid the {@code String}
+     * allocation that {@link Double#toString} would otherwise produce.
+     */
+    private void printDouble(double value) {
+        numSb.append(value);
+        int len = numSb.length();
+        numSb.getChars(0, len, numChars, 0);
+        printWriter.write(numChars, 0, len);
+        numSb.setLength(0);
+    }
+
+    /**
+     * Writes the timestamp as {@code "dd-MM-yyyy HH:mm:ss"} into a pre-allocated
+     * {@code char[19]} buffer using a reused {@link Calendar} and {@link Date}, then
+     * flushes the buffer to the {@link PrintWriter} in one call.
+     * No {@code String}, {@code Instant}, or formatter object is allocated.
+     */
+    @SuppressWarnings("checkstyle:magicnumber")
+    private void printDateTime(long timeMillis) {
+        calDate.setTime(timeMillis);
+        calendar.setTime(calDate);
+
+        int day   = calendar.get(Calendar.DAY_OF_MONTH);
+        int month = calendar.get(Calendar.MONTH) + 1;
+        int year  = calendar.get(Calendar.YEAR);
+        int hour  = calendar.get(Calendar.HOUR_OF_DAY);
+        int min   = calendar.get(Calendar.MINUTE);
+        int sec   = calendar.get(Calendar.SECOND);
+
+        timeBuf[0]  = DIGITS[day   / 10];
+        timeBuf[1]  = DIGITS[day   % 10];
+        timeBuf[2]  = '-';
+        timeBuf[3]  = DIGITS[month / 10];
+        timeBuf[4]  = DIGITS[month % 10];
+        timeBuf[5]  = '-';
+        timeBuf[6]  = DIGITS[year  / 1000];
+        timeBuf[7]  = DIGITS[(year /  100) % 10];
+        timeBuf[8]  = DIGITS[(year /   10) % 10];
+        timeBuf[9]  = DIGITS[year          % 10];
+        timeBuf[10] = ' ';
+        timeBuf[11] = DIGITS[hour / 10];
+        timeBuf[12] = DIGITS[hour % 10];
+        timeBuf[13] = ':';
+        timeBuf[14] = DIGITS[min  / 10];
+        timeBuf[15] = DIGITS[min  % 10];
+        timeBuf[16] = ':';
+        timeBuf[17] = DIGITS[sec  / 10];
+        timeBuf[18] = DIGITS[sec  % 10];
+
+        printWriter.write(timeBuf, 0, DATE_BUF_SIZE);
     }
 }
