@@ -211,9 +211,13 @@ public class DiagnosticsLogWriterJsonImpl implements DiagnosticsLogWriter {
     @Override
     public void writeKeyValueEntry(String key, String value) {
         writeKey(key);
-        printWriter.print("\"");
-        printEscaped(value);
-        printWriter.print("\"");
+        if (value == null) {
+            printWriter.print("null");
+        } else {
+            printWriter.print("\"");
+            printEscaped(value);
+            printWriter.print("\"");
+        }
     }
 
     @Override

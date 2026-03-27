@@ -94,7 +94,7 @@
       "anyOf": [
         {
           "type": "string",
-          "description": "String value, including datetime strings from writeKeyValueEntryAsDateTime. The string literal 'null' (quoted) indicates a Java null passed to writeKeyValueEntry(key, String)."
+          "description": "String value, including datetime strings from writeKeyValueEntryAsDateTime."
         },
         {
           "type": "integer",
@@ -110,7 +110,7 @@
         },
         {
           "type": "null",
-          "description": "Explicit null produced by writeStructuredEntry when a null value argument is passed."
+          "description": "JSON null produced by: (1) writeKeyValueEntry(key, (String) null) — used by MetricsPlugin.collectNoValue to indicate a metric that was registered but had no value at collection time; (2) writeStructuredEntry when a null value argument is passed."
         },
         {
           "type": "array",

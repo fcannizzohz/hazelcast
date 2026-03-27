@@ -136,9 +136,12 @@ never JSON `null`. Examples:
   no cause exception.
 - `"UpstreamRevision"` in `BuildInfo` is absent when the build has no upstream.
 
-The only value emitted as JSON `null` is when a Java `null` is passed to
-`writeStructuredEntry` (e.g. `operationDetails` in `slowInvocations` if the
-operation details string is null).
+JSON `null` appears in two cases:
+- `writeKeyValueEntry(key, (String) null)` — used by `MetricsPlugin.collectNoValue`
+  when a metric was registered but had no value at collection time (e.g.
+  `"os.cpu.load": null`). In STANDARD format the same case writes `"NA"`.
+- `writeStructuredEntry` with a null value argument — e.g. `operationDetails`
+  in `slowInvocations` when the operation details string is absent.
 
 ### Numeric types
 
@@ -246,14 +249,16 @@ Unit names are lower-cased (e.g. `bytes`, `ms`, `ns`, `percent`).
 
 ```typescript
 interface MetricContent {
-  [parsedMetricKey: string]: number | string;
-  // number when collectLong/collectDouble; string when collectException/collectNoValue
+  [parsedMetricKey: string]: number | string | null;
+  // number  — collectLong / collectDouble
+  // string  — collectException (exception class + message)
+  // null    — collectNoValue (metric registered but no value at collection time)
   // key examples: "jvm.memory.heap.used(bytes)", "map.size[instance=myMap]", "os.cpu.load"
 }
 ```
 
 ```json
-{"epoch":1710849600000,"name":"Metric","content":{"jvm.memory.heap.used(bytes)":1048576,"jvm.memory.heap.used(percent)":68.4,"os.cpu.load":"NA","map.size[instance=myMap]":42}}
+{"epoch":1710849600000,"name":"Metric","content":{"jvm.memory.heap.used(bytes)":1048576,"jvm.memory.heap.used(percent)":68.4,"os.cpu.load":null,"map.size[instance=myMap]":42}}
 ```
 
 > **STANDARD vs JSON difference:** STANDARD uses the raw `[metric=...,unit=...]`
@@ -938,28 +943,6 @@ interface SampleEntry {
 {"epoch":1710849600000,"name":"Invocations","content":{"Pending":{"entries":[{"description":"BasicInvocation{op=PutOperation, ...}","duration":12000,"unit":"ms"},{"text":"max number of invocations to print reached."}]},"History":{"entries":[{"operation":"com.hazelcast.map.impl.operation.PutOperation","samples":50}]},"SlowHistory":{"entries":[{"operation":"com.hazelcast.map.impl.operation.PutOperation","samples":2}]}}}
 ```
 
-<!-- expanded for reference:
-{"epoch":1710849600000,"name":"Invocations","content":{
-  "Pending": {
-    "entries": [
-      { "description": "BasicInvocation{op=PutOperation, ...}", "duration": 12000, "unit": "ms" },
-      { "text": "max number of invocations to print reached." }
-    ]
-  },
-  "History": {
-    "entries": [
-      { "operation": "com.hazelcast.map.impl.operation.PutOperation", "samples": 50 }
-    ]
-  },
-  "SlowHistory": {
-    "entries": [
-      { "operation": "com.hazelcast.map.impl.operation.PutOperation", "samples": 2 }
-    ]
-  }
-}}
--->
-```
-
 ---
 
 ## Implementation
@@ -1504,7 +1487,7 @@ traces) the JSON output is often *smaller* than STANDARD because the indentation
 whitespace is eliminated. For `MetricsPlugin`, each JSON line is roughly:
 
 ```
-{"epoch":1710849600000,"name":"Metric","content":{"jvm.memory.heap.used(bytes)":1048576,"jvm.memory.heap.used(percent)":68.4,"os.cpu.load":"NA"}}
+{"epoch":1710849600000,"name":"Metric","content":{"jvm.memory.heap.used(bytes)":1048576,"jvm.memory.heap.used(percent)":68.4,"os.cpu.load":null}}
 ```
 
 versus the STANDARD equivalent (one section per metric):
@@ -1539,3 +1522,340 @@ values. The only remaining difference is the additional state-tracking branches
 in `writeKey`/`writeEntry` and the `double` formatting path, both of which are
 shared limitations. There is no remaining candidate for a targeted
 zero-allocation rewrite.
+
+---
+
+## Support and root-cause analysis with jq
+
+This section provides ready-to-run `jq` recipes for support engineers and
+on-call engineers working from a collected JSON diagnostic log file.
+
+**Assumptions:**
+- Log file is named `diag.log` — one JSON object per line (NDJSON).
+- `jq` 1.6+ is installed.
+- Timestamps shown by `jq` are epoch-milliseconds unless converted.
+- Recipes target the **JSON format** produced by `DiagnosticsLogWriterJsonImpl`.
+
+**Convert epoch ms to a human-readable date (append to any recipe):**
+```bash
+| .epoch |= (. / 1000 | strftime("%Y-%m-%dT%H:%M:%SZ"))
+```
+
+---
+
+### Navigation — orient yourself in an unknown log file
+
+```bash
+# How many events are in the file?
+wc -l diag.log
+
+# What plugin names appear, and how many times?
+jq -r '.name' diag.log | sort | uniq -c | sort -rn
+
+# What is the time range of the log?
+jq -s '[.[].epoch] | {first: min, last: max, span_minutes: ((max - min) / 60000)}' diag.log
+
+# Pretty-print a single event by name (first match)
+jq 'select(.name == "BuildInfo")' diag.log | head -1 | jq .
+
+# List all distinct event names in chronological order of first occurrence
+jq -r '.name' diag.log | awk '!seen[$0]++'
+```
+
+---
+
+### Build and configuration — what is actually running
+
+```bash
+# Hazelcast version, revision and build number
+jq 'select(.name == "BuildInfo") | .content | {Version, Revision, BuildNumber, Enterprise}' diag.log
+
+# Call timeout and slow-operation settings (key config knobs for latency cases)
+jq 'select(.name == "ConfigProperties") | .content |
+    to_entries |
+    map(select(.key | test("timeout|slow|backpressure|operation"; "i"))) |
+    from_entries' diag.log
+
+# JVM version and OS
+jq 'select(.name == "SystemProperties") | .content |
+    {"java.version", "os.name", "os.version", "user.timezone"}' diag.log
+```
+
+---
+
+### Memory pressure — is the JVM running out of heap?
+
+```bash
+# Heap used (bytes) and percent over time
+jq 'select(.name == "Metric") |
+    {epoch,
+     heap_used_bytes: .content["jvm.memory.heap.used(bytes)"],
+     heap_used_pct:   .content["jvm.memory.heap.used(percent)"],
+     heap_max_bytes:  .content["jvm.memory.heap.max(bytes)"]}' diag.log
+
+# Flag samples where heap is above 80 %
+jq 'select(.name == "Metric") |
+    select(.content["jvm.memory.heap.used(percent)"] > 80) |
+    {epoch, pct: .content["jvm.memory.heap.used(percent)"]}' diag.log
+
+# Peak heap percent across the whole file
+jq 'select(.name == "Metric") | .content["jvm.memory.heap.used(percent)"] // empty' diag.log \
+  | jq -s 'max'
+
+# GC collection time (if present) — rising values indicate GC pressure
+jq 'select(.name == "Metric") |
+    {epoch, gc_time: .content["jvm.gc.collectionTime(ms)"]}' diag.log \
+  | jq 'select(.gc_time != null)'
+
+# CPU load over time (processCpuLoad is the JVM process; cpu.load is system)
+jq 'select(.name == "Metric") |
+    {epoch,
+     process_cpu: .content["os.processCpuLoad(percent)"],
+     system_cpu:  .content["os.cpu.load"]}' diag.log
+```
+
+---
+
+### Slow operations — where is time being spent?
+
+```bash
+# All SlowOperations events — which operation classes appeared?
+jq 'select(.name == "SlowOperations") | .content | keys[]' diag.log | sort | uniq -c | sort -rn
+
+# For each slow-operations event: operation class, invocation count, worst duration
+jq 'select(.name == "SlowOperations") |
+    .epoch as $e |
+    .content | to_entries[] |
+    {epoch: $e,
+     operation: .key,
+     invocations: .value.invocations,
+     worst_duration_ms: (.value.slowInvocations.entries // [] | map(.["duration(ms)"]) | max)}' diag.log
+
+# Stack trace for a specific operation (first occurrence)
+jq 'select(.name == "SlowOperations") |
+    select(.content["com.hazelcast.map.impl.operation.PutOperation"] != null) |
+    .content["com.hazelcast.map.impl.operation.PutOperation"].stackTrace.entries[].line' \
+  diag.log | head -20
+
+# Top-10 slowest individual invocations across all events
+jq 'select(.name == "SlowOperations") |
+    .content | to_entries[] |
+    .key as $op |
+    .value.slowInvocations.entries // [] |
+    .[] |
+    {operation: $op, startedAt, duration_ms: .["duration(ms)"], details: .operationDetails}' \
+  diag.log \
+  | jq -s 'sort_by(-.duration_ms) | .[0:10][]'
+
+# OperationsProfiler — operations sorted by average latency
+jq 'select(.name == "OperationsProfiler") |
+    .content | to_entries |
+    sort_by(-.value["avg(us)"]) |
+    .[] |
+    {operation: .key, count: .value.count, avg_us: .value["avg(us)"], max_us: .value["max(us)"]}' \
+  diag.log
+
+# What was running on operation threads at sample time?
+jq 'select(.name == "OperationThreadSamples") |
+    {epoch,
+     partition: (.content.Partition.entries // []),
+     generic:   (.content.Generic.entries   // [])}' diag.log
+```
+
+---
+
+### Stuck operations — invocation backlog and timeouts
+
+```bash
+# Pending invocation count over time
+jq 'select(.name == "PendingInvocations") | {epoch, count: .content.count}' diag.log
+
+# Peak pending invocations (a spike here often precedes a timeout storm)
+jq 'select(.name == "PendingInvocations") | .content.count' diag.log \
+  | jq -s 'max'
+
+# Which operations are dominating the pending queue?
+jq 'select(.name == "PendingInvocations") |
+    .content.invocations.entries // [] |
+    sort_by(-.count) | .[0:5][]' diag.log
+
+# Invocations plugin — slow pending ops (duration in ms)
+jq 'select(.name == "Invocations") |
+    .epoch as $e |
+    .content.Pending.entries // [] |
+    map(select(.duration != null)) |
+    sort_by(-.duration) |
+    .[] | {epoch: $e, duration_ms: .duration, description}' diag.log
+
+# SlowHistory — which operation types have accumulated slow-invocation samples?
+jq 'select(.name == "Invocations") |
+    {epoch, slow_history: (.content.SlowHistory.entries // [])}' diag.log \
+  | jq 'select(.slow_history | length > 0)'
+
+# InvocationProfiler — average and max latency per operation type
+jq 'select(.name == "InvocationProfiler") |
+    .content | to_entries |
+    sort_by(-.value["max(us)"]) |
+    .[] |
+    {operation: .key, count: .value.count, avg_us: .value["avg(us)"], max_us: .value["max(us)"]}' \
+  diag.log
+```
+
+---
+
+### Network and heartbeat anomalies — split-brain and connectivity
+
+```bash
+# All OperationHeartbeat events (only emitted when deviation exceeds threshold)
+jq 'select(.name == "OperationHeartbeat")' diag.log
+
+# Members with deviation > 100 % across all OperationHeartbeat events
+jq 'select(.name == "OperationHeartbeat") |
+    .epoch as $e |
+    .content.members[] |
+    select(.["deviation(%)"] > 100) |
+    {epoch: $e, address, deviation_pct: .["deviation(%)"], no_heartbeat_ms: .["noHeartbeat(ms)"]}' \
+  diag.log
+
+# Timeline of heartbeat deviations for a specific member
+jq --arg addr "192.168.1.11:5701" '
+    select(.name == "OperationHeartbeat" or .name == "MemberHeartbeats") |
+    .epoch as $e |
+    .content.members[] |
+    select(.address == $addr) |
+    {epoch: $e, plugin: "OperationHeartbeat", deviation_pct: .["deviation(%)"], no_heartbeat_ms: .["noHeartbeat(ms)"]}' \
+  diag.log
+
+# Worst single deviation across all heartbeat events
+jq '(select(.name == "OperationHeartbeat") // select(.name == "MemberHeartbeats")) |
+    .content.members[].["deviation(%)"]' diag.log \
+  | jq -s 'max'
+
+# Connection events — member connections opening and closing
+jq 'select(.name == "ConnectionAdded" or .name == "ConnectionRemoved") |
+    {epoch, event: .name, connection: .content.entries[0].connection,
+     type: .content.type, alive: .content.isAlive,
+     reason: .content.closeReason}' diag.log
+
+# Connection removals with a close cause (indicates abnormal disconnect)
+jq 'select(.name == "ConnectionRemoved") |
+    select(.content.CloseCause != null) |
+    {epoch,
+     connection: .content.entries[0].connection,
+     reason: .content.closeReason,
+     exception: .content.CloseCause.entries[0].exceptionClass,
+     message:   .content.CloseCause.entries[0].message}' diag.log
+
+# Overloaded connections — which remote addresses are being flooded?
+jq 'select(.name == "OverloadedConnections") |
+    .epoch as $e |
+    .content.connection[] |
+    {epoch: $e, from, to,
+     packets: (.packetCount // .urgentPacketCount),
+     top_type: (.samples.entries // [] | sort_by(-.sampleCount) | .[0].connectionType)}' \
+  diag.log
+```
+
+---
+
+### Cluster membership — member joins, leaves and state changes
+
+```bash
+# All membership events in order
+jq 'select(.name == "MemberAdded" or .name == "MemberRemoved") |
+    {epoch, event: .name, member: .content.member}' diag.log
+
+# Members that left the cluster
+jq 'select(.name == "MemberRemoved") | {epoch, member: .content.member}' diag.log
+
+# Cluster size over time (from HazelcastInstance snapshots)
+jq 'select(.name == "HazelcastInstance") |
+    {epoch, clusterSize: .content.clusterSize, nodeState: .content.nodeState,
+     isMaster: .content.isMaster}' diag.log
+
+# Detect when the node was not in ACTIVE state
+jq 'select(.name == "HazelcastInstance") |
+    select(.content.nodeState != "ACTIVE") |
+    {epoch, nodeState: .content.nodeState}' diag.log
+
+# Node lifecycle transitions (STARTING → STARTED → SHUTTING_DOWN → SHUTDOWN)
+jq 'select(.name == "Lifecycle") |
+    {epoch, state: .content.entries[0].state}' diag.log
+```
+
+---
+
+### Map and cache store latency — MapLoader / MapStore performance
+
+```bash
+# All MapService store-latency events
+jq 'select(.name == "MapService")' diag.log
+
+# Average and max load latency per map, sorted by worst average
+jq 'select(.name == "MapService") |
+    .content | to_entries[] |
+    .key as $map |
+    (.value.load // empty) |
+    {map: $map, count, avg_us: .["avg(us)"], max_us: .["max(us)"]}' \
+  diag.log \
+  | jq -s 'sort_by(-.avg_us)[]'
+
+# Any load operation taking > 1 ms on average (1000 us)
+jq 'select(.name == "MapService") |
+    .content | to_entries[] |
+    select(.value.load["avg(us)"] > 1000) |
+    {map: .key, avg_us: .value.load["avg(us)"], max_us: .value.load["max(us)"]}' diag.log
+
+# CacheService — same pattern
+jq 'select(.name == "CacheService") |
+    .content | to_entries[] |
+    .key as $cache |
+    (.value.load // empty) |
+    {cache: $cache, count, avg_us: .["avg(us)"], max_us: .["max(us)"]}' diag.log
+```
+
+---
+
+### Cross-plugin timeline — correlate events around a suspected incident
+
+```bash
+# Full event timeline: epoch + name (useful to paste into a spreadsheet or ticket)
+jq '{epoch, name}' diag.log
+
+# Narrow to a time window (epoch ms — adjust bounds to the incident window)
+jq 'select(.epoch >= 1742385500000 and .epoch <= 1742385700000) | {epoch, name}' diag.log
+
+# All significant events in a window: slow ops, heartbeat issues, membership changes,
+# high heap, lifecycle — in one timeline
+jq 'select(
+      .name == "SlowOperations"       or
+      .name == "OperationHeartbeat"   or
+      .name == "MemberHeartbeats"     or
+      .name == "MemberAdded"          or
+      .name == "MemberRemoved"        or
+      .name == "ConnectionRemoved"    or
+      .name == "Lifecycle"
+    ) |
+    {epoch, name,
+     summary: (
+       if   .name == "SlowOperations"     then (.content | keys | join(", "))
+       elif .name == "OperationHeartbeat" then (.content.members | map(.address + " +" + (.["deviation(%)"] | tostring) + "%") | join(", "))
+       elif .name == "MemberHeartbeats"   then (.content.members | map(.address + " +" + (.["deviation(%)"] | tostring) + "%") | join(", "))
+       elif .name == "MemberAdded"        then ("+" + .content.member)
+       elif .name == "MemberRemoved"      then ("-" + .content.member)
+       elif .name == "ConnectionRemoved"  then (.content.entries[0].connection + " reason=" + (.content.closeReason // "none"))
+       elif .name == "Lifecycle"          then .content.entries[0].state
+       else "" end
+     )}' diag.log
+
+# Heap at every slow-operations event — did memory pressure coincide?
+jq -s '
+  (map(select(.name == "Metric")) | map({epoch, pct: .content["jvm.memory.heap.used(percent)"]})) as $heap |
+  .[] |
+  select(.name == "SlowOperations") |
+  .epoch as $e |
+  {epoch: $e,
+   slow_ops: (.content | keys),
+   heap_pct: ($heap | map(select(.epoch <= $e)) | sort_by(.epoch) | last | .pct)}
+' diag.log
+```

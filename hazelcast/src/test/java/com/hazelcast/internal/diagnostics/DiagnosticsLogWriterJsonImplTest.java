@@ -52,7 +52,7 @@ public class DiagnosticsLogWriterJsonImplTest extends HazelcastTestSupport {
 
         String actual = out.toString();
         assertTrue(actual.contains("\"name\":\"SomeSection\""));
-        assertTrue(actual.contains("\"s\":\"null\""));
+        assertTrue(actual.contains("\"s\":null"));
         assertTrue(actual.endsWith("}" + System.lineSeparator()));
     }
 
@@ -419,7 +419,7 @@ public class DiagnosticsLogWriterJsonImplTest extends HazelcastTestSupport {
         writer.startSection("Metric", ts);
         writer.writeKeyValueEntry("jvm.memory.heap.used(bytes)", 1048576L);
         writer.writeKeyValueEntry("jvm.memory.heap.used(percent)", 68.4);
-        writer.writeKeyValueEntry("os.cpu.load", "NA");
+        writer.writeKeyValueEntry("os.cpu.load", (String) null);  // collectNoValue → null
         writer.writeKeyValueEntry("map.size[instance=myMap]", 42L);
         writer.endSection();
 
@@ -429,7 +429,7 @@ public class DiagnosticsLogWriterJsonImplTest extends HazelcastTestSupport {
         // All metrics must be flat key-value pairs in content — no "entries" array
         assertTrue(actual.contains("\"jvm.memory.heap.used(bytes)\":1048576"));
         assertTrue(actual.contains("\"jvm.memory.heap.used(percent)\":68.4"));
-        assertTrue(actual.contains("\"os.cpu.load\":\"NA\""));
+        assertTrue(actual.contains("\"os.cpu.load\":null"));
         assertTrue(actual.contains("\"map.size[instance=myMap]\":42"));
         assertFalse("metrics must not be wrapped in an entries array", actual.contains("\"entries\""));
         // Envelope

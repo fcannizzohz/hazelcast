@@ -155,7 +155,8 @@ public class MetricsPlugin extends DiagnosticsPlugin {
         public void collectNoValue(MetricDescriptor descriptor) {
             if (writer != null && descriptor.isTargetIncluded(DIAGNOSTICS)) {
                 if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
-                    writer.writeKeyValueEntry(metricKey(descriptor), "NA");
+                    // JSON null: metric was registered but had no value at collection time
+                    writer.writeKeyValueEntry(metricKey(descriptor), (String) null);
                 } else {
                     writer.writeSectionKeyValue(SECTION_NAME, timeMillis, metricKey(descriptor), "NA");
                 }
