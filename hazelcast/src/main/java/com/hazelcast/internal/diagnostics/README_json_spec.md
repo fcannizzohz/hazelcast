@@ -48,9 +48,7 @@ interface DiagnosticsLine {
 }
 ```
 
-**`epoch` presence:** Always emitted. The JSON writer emits it directly;
-`DiagnosticsLogConverter` derives it from the STANDARD header timestamp when the
-source log was written without epoch (second precision, millis always `000`).
+**`epoch` presence:** Always emitted. The JSON writer emits it directly.
 
 **No `time` field:** A human-readable timestamp is intentionally omitted.
 It would be redundant with `epoch`, and the STANDARD format uses a non-ISO
@@ -952,7 +950,7 @@ interface SampleEntry {
 | `DiagnosticsLogFormat` | Enum: `STANDARD`, `JSON` |
 | `DiagnosticsLogWriterFactory` | Creates the right writer based on `DiagnosticsLogFormat` |
 | `DiagnosticsLogWriterJsonImpl` | Stateful JSON writer; emits one JSON line per top-level `startSection`/`endSection` pair |
-| `DiagnosticsLogConverter` | Utility: parses a STANDARD-format entry string into a `DiagnosticEntry` POJO and can serialize it back to JSON |
+ `DiagnosticEntry` POJO and can serialize it back to JSON |
 | `DiagnosticsConfig` | Holds the `logFormat` field; serialized/deserialized via `IdentifiedDataSerializable` |
 
 ### Key design decisions
@@ -1010,8 +1008,7 @@ available from `MigrationState.getStartTime()`.
 
 This section documents the design decisions taken when adding JSON output
 support, and explains why the choices were made the way they were — particularly
-with respect to backward compatibility, log ingestion tooling, and the
-[`DiagnosticsLogConverter`](#diagnosticslogconverter).
+with respect to backward compatibility and log ingestion tooling.
 
 ### Context: what existed before
 
@@ -1175,47 +1172,6 @@ but illegal in JSON (duplicate object keys).
 The JSON path uses a `"connection": [...]` array via the new
 `startArrayItemSection`/`endArrayItemSection` API. This eliminates duplicate
 keys while keeping the same information. The STANDARD path is unchanged.
-
----
-
-## DiagnosticsLogConverter
-
-`DiagnosticsLogConverter` is a utility class that translates between the two
-formats. It is **not** used in the hot path during normal cluster operation; its
-role is offline conversion and tooling integration.
-
-### STANDARD → JSON (`parseStandard` + `toJson`)
-
-`parseStandard` parses a STANDARD-format multi-line block into an intermediate
-`DiagnosticEntry` POJO. `toJson` serializes that POJO to a compact JSON string
-following the same schema as live JSON writer output.
-
-**Epoch derivation.** If the source STANDARD entry was written without
-`includeEpochTime=true`, the epoch field is absent from the header. Rather than
-emitting schema-incompliant JSON with a missing `epoch`, the converter derives
-the epoch from the STANDARD header timestamp by parsing `dd-MM-yyyy HH:mm:ss`
-against the JVM default timezone. The derived value has millisecond precision
-of `000` (second-boundary), which is the best that can be done without the
-original millisecond value. The result is always schema-compliant.
-
-### JSON → STANDARD (`parseJson` + `toStandard`)
-
-`parseJson` reads a compact JSON line back into a `DiagnosticEntry`. Because
-JSON output no longer carries a `time` field, `parseJson` derives the `time`
-string from `epoch` (formatting it as `dd-MM-yyyy HH:mm:ss` in the JVM default
-timezone) so that `toStandard` can reconstruct a valid STANDARD header.
-`toStandard` then rebuilds the multi-line block with comma-grouped numbers,
-escaped special characters, and the correct indent depth. Round-trips are fully
-lossless for all data in the `content` object.
-
-### Use cases
-
-| Scenario | How to use |
-|---|---|
-| Migrate existing STANDARD log files to JSON for ingestion | `parseStandard` each block → `toJson` → write lines to new file |
-| Convert live JSON stream back to STANDARD for human inspection | `parseJson` each line → `toStandard` → write blocks to file |
-| Validate that a JSON output is schema-compliant | validate each line against `diaglogs.schema.json` |
-| Feed historical logs into a tool that only accepts NDJSON | convert with the STANDARD→JSON path, then ship |
 
 ---
 
