@@ -95,7 +95,16 @@ public class MetricsPlugin extends DiagnosticsPlugin {
         // we set the time explicitly so that for this particular rendering of the probes, all metrics have exactly
         // the same timestamp
         metricCollector.timeMillis = System.currentTimeMillis();
-        metricsRegistry.collect(metricCollector);
+        if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+            // JSON: wrap the entire collection in a single section so all metrics from one
+            // collection cycle are emitted as a single flat JSON object rather than one line
+            // per metric. Content: {"metric.key":value, ...} — no "entries" array wrapper.
+            writer.startSection(MetricsCollectorImpl.SECTION_NAME, metricCollector.timeMillis);
+            metricsRegistry.collect(metricCollector);
+            writer.endSection();
+        } else {
+            metricsRegistry.collect(metricCollector);
+        }
         metricCollector.writer = null;
     }
 
@@ -111,29 +120,45 @@ public class MetricsPlugin extends DiagnosticsPlugin {
             // during shutdown although plugin is closed, it has no ability to close the metric collector.
             // So we need to check if writer is null or not.
             if (writer != null && descriptor.isTargetIncluded(DIAGNOSTICS)) {
-                writer.writeSectionKeyValue(SECTION_NAME, timeMillis, metricKey(descriptor), value);
+                if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+                    writer.writeKeyValueEntry(metricKey(descriptor), value);
+                } else {
+                    writer.writeSectionKeyValue(SECTION_NAME, timeMillis, metricKey(descriptor), value);
+                }
             }
         }
 
         @Override
         public void collectDouble(MetricDescriptor descriptor, double value) {
             if (writer != null && descriptor.isTargetIncluded(DIAGNOSTICS)) {
-                writer.writeSectionKeyValue(SECTION_NAME, timeMillis, metricKey(descriptor), value);
+                if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+                    writer.writeKeyValueEntry(metricKey(descriptor), value);
+                } else {
+                    writer.writeSectionKeyValue(SECTION_NAME, timeMillis, metricKey(descriptor), value);
+                }
             }
         }
 
         @Override
         public void collectException(MetricDescriptor descriptor, Exception e) {
             if (writer != null && descriptor.isTargetIncluded(DIAGNOSTICS)) {
-                writer.writeSectionKeyValue(SECTION_NAME, timeMillis, metricKey(descriptor),
-                        e.getClass().getName() + ':' + e.getMessage());
+                String exceptionValue = e.getClass().getName() + ':' + e.getMessage();
+                if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+                    writer.writeKeyValueEntry(metricKey(descriptor), exceptionValue);
+                } else {
+                    writer.writeSectionKeyValue(SECTION_NAME, timeMillis, metricKey(descriptor), exceptionValue);
+                }
             }
         }
 
         @Override
         public void collectNoValue(MetricDescriptor descriptor) {
             if (writer != null && descriptor.isTargetIncluded(DIAGNOSTICS)) {
-                writer.writeSectionKeyValue(SECTION_NAME, timeMillis, metricKey(descriptor), "NA");
+                if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+                    writer.writeKeyValueEntry(metricKey(descriptor), "NA");
+                } else {
+                    writer.writeSectionKeyValue(SECTION_NAME, timeMillis, metricKey(descriptor), "NA");
+                }
             }
         }
 

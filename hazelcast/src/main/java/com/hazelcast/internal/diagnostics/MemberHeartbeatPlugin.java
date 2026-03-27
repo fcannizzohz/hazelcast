@@ -136,16 +136,23 @@ public class MemberHeartbeatPlugin extends DiagnosticsPlugin {
             if (deviation >= maxDeviationPercentage) {
                 startLazyMainSection(writer);
 
-                writer.startSection("member" + member.getAddress());
+                if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+                    writer.startArrayItemSection("members");
+                    writer.writeKeyValueEntry("address", member.getAddress().toString());
+                } else {
+                    writer.startSection("member" + member.getAddress());
+                }
                 writer.writeKeyValueEntry("deviation(%)", deviation);
                 writer.writeKeyValueEntry("noHeartbeat(ms)", noHeartbeatMillis);
                 writer.writeKeyValueEntry("lastHeartbeat(ms)", lastHeartbeatMillis);
                 writer.writeKeyValueEntry("now(ms)", nowMillis);
-                if (writer.getFormat() != DiagnosticsLogFormat.JSON) {
+                if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+                    writer.endArrayItemSection();
+                } else {
                     writer.writeKeyValueEntryAsDateTime("lastHeartbeat(date-time)", lastHeartbeatMillis);
                     writer.writeKeyValueEntryAsDateTime("now(date-time)", nowMillis);
+                    writer.endSection();
                 }
-                writer.endSection();
             }
         }
 

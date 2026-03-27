@@ -103,7 +103,7 @@ sections suppress output entirely when there is nothing to report:
 
 | Behaviour | Plugins |
 |---|---|
-| **Always emits** one or more lines per run | `BuildInfoPlugin` (run-once), `ConfigPropertiesPlugin` (run-once), `SystemPropertiesPlugin` (run-once), `MetricsPlugin` (one line per metric), `PendingInvocationsPlugin`, `SlowOperationPlugin`, `OperationProfilerPlugin`, `InvocationProfilerPlugin`, `OperationThreadSamplerPlugin`, `MemberHazelcastInstanceInfoPlugin`, `InvocationSamplePlugin` |
+| **Always emits** one or more lines per run | `BuildInfoPlugin` (run-once), `ConfigPropertiesPlugin` (run-once), `SystemPropertiesPlugin` (run-once), `MetricsPlugin` (one line per cycle), `PendingInvocationsPlugin`, `SlowOperationPlugin`, `OperationProfilerPlugin`, `InvocationProfilerPlugin`, `OperationThreadSamplerPlugin`, `MemberHazelcastInstanceInfoPlugin`, `InvocationSamplePlugin` |
 | **Emits one line per event** (event-driven) | `SystemLogPlugin` |
 | **Emits per service** (one line per service with data) | `StoreLatencyPlugin` |
 | **Suppresses output** when nothing to report | `OperationHeartbeatPlugin`, `MemberHeartbeatPlugin`, `EventQueuePlugin` (below threshold), `OverloadedConnectionsPlugin` (below threshold), `NetworkingImbalancePlugin` |
@@ -232,11 +232,13 @@ interface SystemPropertiesContent {
 
 ### MetricsPlugin
 
-**`name`:** `"Metric"` | periodic | **one JSON line per metric**
+**`name`:** `"Metric"` | periodic | **one JSON line per collection cycle**
 
-Each call to `metricsRegistry.collect()` produces an independent JSON line.
-The entire `content` object contains exactly **one key**: the metric name in
-parsed form.
+One `metricsRegistry.collect()` call produces exactly **one** JSON line.
+All metrics from the collection cycle are flat key-value pairs directly inside
+`content` — no `"entries"` array, no wrapper objects.  This makes each line a
+self-contained snapshot and keeps Loki field extraction simple (each metric is
+directly accessible as a label after the `json` pipeline stage).
 
 **Metric key format:** `[prefix.]metric[discriminator=value][tag=value](unit)`
 where the discriminator/tag and unit parts are omitted when not present.
@@ -251,17 +253,12 @@ interface MetricContent {
 ```
 
 ```json
-{"epoch":1710849600000,"name":"Metric","content":{"jvm.memory.heap.used(bytes)":1048576}}
-{"epoch":1710849600000,"name":"Metric","content":{"jvm.memory.heap.used(percent)":68.4}}
-{"epoch":1710849600000,"name":"Metric","content":{"os.cpu.load":"NA"}}
-{"epoch":1710849600000,"name":"Metric","content":{"map.size[instance=myMap]":42}}
+{"epoch":1710849600000,"name":"Metric","content":{"jvm.memory.heap.used(bytes)":1048576,"jvm.memory.heap.used(percent)":68.4,"os.cpu.load":"NA","map.size[instance=myMap]":42}}
 ```
 
-> **Parser note:** All lines in a single metrics collection share the same
-> `epoch` value (set once before `metricsRegistry.collect()` is called).
-
 > **STANDARD vs JSON difference:** STANDARD uses the raw `[metric=...,unit=...]`
-> bracket notation. JSON uses the human-readable parsed form above.
+> bracket notation and emits one section per metric. JSON uses the parsed key
+> format and consolidates all metrics from one cycle into a single flat object.
 
 ---
 
@@ -564,10 +561,10 @@ interface ReplicaMigrationContent {
 
 ```typescript
 interface OperationHeartbeatContent {
-  [memberKey: string]: MemberHeartbeatEntry;
-  // key is "member" + address.toString(), e.g. "member192.168.1.11:5701"
+  members: MemberHeartbeatEntry[];  // one entry per member exceeding the deviation threshold
 }
 interface MemberHeartbeatEntry {
+  address:             string;   // member address, e.g. "192.168.1.11:5701"
   "deviation(%)":      number;   // float: percentage over expected interval
   "noHeartbeat(ms)":   number;   // ms since last heartbeat
   "lastHeartbeat(ms)": number;   // epoch ms of last heartbeat
@@ -576,18 +573,38 @@ interface MemberHeartbeatEntry {
 ```
 
 ```json
-{"epoch":1742385600000,"name":"OperationHeartbeat","content":{
-  "member192.168.1.11:5701": {
-    "deviation(%)": 66.66667,
-    "noHeartbeat(ms)": 25000,
-    "lastHeartbeat(ms)": 1710849575000,
-    "now(ms)": 1710849600000
-  }
-}}
+{"epoch":1742385600000,"name":"OperationHeartbeat","content":{"members":[{"address":"192.168.1.11:5701","deviation(%)":66.66667,"noHeartbeat(ms)":25000,"lastHeartbeat(ms)":1710849575000,"now(ms)":1710849600000}]}}
 ```
 
-> **STANDARD vs JSON difference:** STANDARD also writes `lastHeartbeat(date-time)`
-> and `now(date-time)` (formatted strings). JSON omits them.
+> **STANDARD vs JSON difference:** STANDARD uses `"member" + address` as the
+> section key (e.g. `member192.168.1.11:5701[...]`) and also writes
+> `lastHeartbeat(date-time)` and `now(date-time)` formatted strings.
+> JSON lifts the address into an `"address"` field inside a `"members"` array
+> and omits the redundant date-time strings.
+
+**jq examples** — given a diagnostics log file `diag.log` (one JSON object per line):
+
+```bash
+# All OperationHeartbeat events that contain at least one deviating member
+grep '"name":"OperationHeartbeat"' diag.log | jq .
+
+# Deviation percentage for every member in every event
+grep '"name":"OperationHeartbeat"' diag.log \
+  | jq '.content.members[] | {address, deviation: .["deviation(%)"]}'
+
+# Only members whose deviation exceeds 100 %
+grep '"name":"OperationHeartbeat"' diag.log \
+  | jq '.content.members[] | select(.["deviation(%)"] > 100) | {address, deviation: .["deviation(%)"]}'
+
+# Worst deviation across all events (single number)
+grep '"name":"OperationHeartbeat"' diag.log \
+  | jq '.content.members[].["deviation(%)"]' \
+  | jq -s 'max'
+
+# Timeline: epoch + address + deviation for all events, sorted by epoch
+grep '"name":"OperationHeartbeat"' diag.log \
+  | jq -s '[.[] | .epoch as $e | .content.members[] | {epoch: $e, address, deviation: .["deviation(%)"]}] | sort_by(.epoch)[]'
+```
 
 ---
 
@@ -597,10 +614,10 @@ interface MemberHeartbeatEntry {
 
 ```typescript
 interface MemberHeartbeatsContent {
-  [memberKey: string]: MemberHeartbeatEntry;
-  // key is "member" + address.toString(), e.g. "member192.168.1.11:5701"
+  members: MemberHeartbeatEntry[];  // one entry per member exceeding the deviation threshold
 }
 interface MemberHeartbeatEntry {
+  address:             string;
   "deviation(%)":      number;
   "noHeartbeat(ms)":   number;
   "lastHeartbeat(ms)": number;
@@ -611,14 +628,7 @@ interface MemberHeartbeatEntry {
 Same shape as `OperationHeartbeat`; different data source and threshold.
 
 ```json
-{"epoch":1742385600000,"name":"MemberHeartbeats","content":{
-  "member192.168.1.11:5701": {
-    "deviation(%)": 120.0,
-    "noHeartbeat(ms)": 11000,
-    "lastHeartbeat(ms)": 1710849589000,
-    "now(ms)": 1710849600000
-  }
-}}
+{"epoch":1742385600000,"name":"MemberHeartbeats","content":{"members":[{"address":"192.168.1.11:5701","deviation(%)":120.0,"noHeartbeat(ms)":11000,"lastHeartbeat(ms)":1710849589000,"now(ms)":1710849600000}]}}
 ```
 
 ---
@@ -982,8 +992,8 @@ The following call sites use format-aware branching to emit structured JSON:
 |--------|-----------|-------------|
 | `BuildInfoPlugin` | `writeBuildNumber` | `BuildNumber` as `long` (STANDARD: string, no comma grouping) |
 | `NetworkingImbalancePlugin` | `writePercentageEntry` | percentage keys as `double` (STANDARD: `"X,XXX.XX %"` string) |
-| `OperationHeartbeatPlugin` | `run` | STANDARD appends `lastHeartbeat(date-time)` and `now(date-time)`; JSON omits them |
-| `MemberHeartbeatPlugin` | `render` | STANDARD appends `lastHeartbeat(date-time)` and `now(date-time)`; JSON omits them |
+| `OperationHeartbeatPlugin` | `run` | JSON uses `"members":[{"address":...}]` array; STANDARD uses `"member<addr>"` section key and also appends `lastHeartbeat(date-time)` / `now(date-time)` |
+| `MemberHeartbeatPlugin` | `render` | Same as `OperationHeartbeatPlugin` above |
 | `SlowOperationPlugin.renderStackTrace` | stack trace lines | `"line"` |
 | `SlowOperationPlugin.renderInvocations` | per invocation | `"startedAt"`, `"duration(ms)"`, `"operationDetails"` (STANDARD also writes `started(date-time)`) |
 | `SystemLogPlugin.render(LifecycleEvent)` | lifecycle state | `"state"` |
@@ -1494,10 +1504,10 @@ traces) the JSON output is often *smaller* than STANDARD because the indentation
 whitespace is eliminated. For `MetricsPlugin`, each JSON line is roughly:
 
 ```
-{"epoch":1710849600000,"name":"Metric","content":{"jvm.memory.heap.used(bytes)":1048576}}
+{"epoch":1710849600000,"name":"Metric","content":{"jvm.memory.heap.used(bytes)":1048576,"jvm.memory.heap.used(percent)":68.4,"os.cpu.load":"NA"}}
 ```
 
-versus the STANDARD equivalent:
+versus the STANDARD equivalent (one section per metric):
 
 ```
 19-03-2026 12:00:00 Metric[

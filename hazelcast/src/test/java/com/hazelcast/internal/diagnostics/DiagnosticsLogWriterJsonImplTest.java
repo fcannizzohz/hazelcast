@@ -408,4 +408,78 @@ public class DiagnosticsLogWriterJsonImplTest extends HazelcastTestSupport {
         String actual = out.toString();
         assertTrue(actual.contains("\"before\":\"val\",\"items\":[{\"k\":\"v\"}]"));
     }
+
+    // --- Consolidated metrics (MetricsPlugin JSON pattern) ---
+
+    @Test
+    public void metrics_multipleTypesInOneBatch_produceSingleFlatJsonLine() {
+        // Simulates how MetricsPlugin.run() wraps all metrics in one startSection/endSection
+        // in JSON mode, so the entire collection cycle becomes a single flat JSON object.
+        long ts = 1710849600000L;
+        writer.startSection("Metric", ts);
+        writer.writeKeyValueEntry("jvm.memory.heap.used(bytes)", 1048576L);
+        writer.writeKeyValueEntry("jvm.memory.heap.used(percent)", 68.4);
+        writer.writeKeyValueEntry("os.cpu.load", "NA");
+        writer.writeKeyValueEntry("map.size[instance=myMap]", 42L);
+        writer.endSection();
+
+        String actual = out.toString().trim();
+        // Must be a single line (no embedded newlines)
+        assertFalse("consolidated metrics must be a single JSON line", actual.contains("\n"));
+        // All metrics must be flat key-value pairs in content — no "entries" array
+        assertTrue(actual.contains("\"jvm.memory.heap.used(bytes)\":1048576"));
+        assertTrue(actual.contains("\"jvm.memory.heap.used(percent)\":68.4"));
+        assertTrue(actual.contains("\"os.cpu.load\":\"NA\""));
+        assertTrue(actual.contains("\"map.size[instance=myMap]\":42"));
+        assertFalse("metrics must not be wrapped in an entries array", actual.contains("\"entries\""));
+        // Envelope
+        assertTrue(actual.contains("\"epoch\":" + ts));
+        assertTrue(actual.contains("\"name\":\"Metric\""));
+    }
+
+    // --- Heartbeat plugins (members array pattern) ---
+
+    @Test
+    public void heartbeat_singleMember_producesAddressFieldInMembersArray() {
+        // Simulates OperationHeartbeatPlugin / MemberHeartbeatPlugin JSON mode:
+        // each deviating member becomes an item in a "members" array with "address" as a field.
+        writer.startSection("OperationHeartbeat");
+        writer.startArrayItemSection("members");
+        writer.writeKeyValueEntry("address", "192.168.1.11:5701");
+        writer.writeKeyValueEntry("deviation(%)", 66.66667);
+        writer.writeKeyValueEntry("noHeartbeat(ms)", 25000L);
+        writer.endArrayItemSection();
+        writer.endSection();
+
+        String actual = out.toString().trim();
+        assertTrue(actual.contains("\"members\":[{\"address\":\"192.168.1.11:5701\""));
+        assertTrue(actual.contains("\"deviation(%)\":66.66667"));
+        assertTrue(actual.contains("\"noHeartbeat(ms)\":25000"));
+        assertFalse("address must not be embedded in a key", actual.contains("\"member192.168.1.11:5701\""));
+    }
+
+    @Test
+    public void heartbeat_multipleMembers_producesArrayWithTwoItems() {
+        writer.startSection("MemberHeartbeats");
+        writer.startArrayItemSection("members");
+        writer.writeKeyValueEntry("address", "192.168.1.11:5701");
+        writer.writeKeyValueEntry("deviation(%)", 120.0);
+        writer.endArrayItemSection();
+        writer.startArrayItemSection("members");
+        writer.writeKeyValueEntry("address", "192.168.1.12:5701");
+        writer.writeKeyValueEntry("deviation(%)", 200.0);
+        writer.endArrayItemSection();
+        writer.endSection();
+
+        String actual = out.toString().trim();
+        assertTrue(actual.contains("\"members\":[{"));
+        assertTrue(actual.contains("\"address\":\"192.168.1.11:5701\""));
+        assertTrue(actual.contains("\"address\":\"192.168.1.12:5701\""));
+        // Two items in the array — look for two opening braces after "members":[
+        int membersIdx = actual.indexOf("\"members\":[");
+        assertTrue(membersIdx >= 0);
+        String membersArray = actual.substring(membersIdx);
+        assertEquals("must have exactly two items", 2,
+                membersArray.split("\\{\"address\"").length - 1);
+    }
 }
