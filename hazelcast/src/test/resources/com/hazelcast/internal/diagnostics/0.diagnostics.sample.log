@@ -1,0 +1,162 @@
+01-10-2025 11:09:31 1759316971200 BuildInfo[
+                          Build=20250319
+                          BuildNumber=20250319
+                          Revision=a36c600
+                          UpstreamRevision=
+                          Version=5.5.5
+                          SerialVersion=1
+                          Enterprise=true]
+01-10-2025 11:09:31 1759316971201 ClusterVersionChanged[
+                          5.5]
+01-10-2025 11:10:18 1759316971202 ConnectionRemoved[
+                          Connection[id=616, /10.134.22.11:5701->10.132.4.94/10.132.4.94:41867, qualifier=EndpointQualifier{type='CLIENT'}, endpoint=[10.132.4.94]:41867, remoteUuid=2f2265fe-fca1-4f9d-a5bf-49085afa7786, alive=false, connectionType=JVM, planeIndex=-1]
+                          type=JVM
+                          isAlive=false
+                          closeReason=Connection closed by the other side
+                          CloseCause[
+                                  java.io.EOFException: Remote socket closed!
+                                  com.hazelcast.internal.networking.nio.NioInboundPipeline.process(NioInboundPipeline.java:118)
+                                  com.hazelcast.internal.networking.nio.NioThread.processSelectionKey(NioThread.java:383)
+                                  com.hazelcast.internal.networking.nio.NioThread.processSelectionKeys(NioThread.java:368)
+                                  com.hazelcast.internal.networking.nio.NioThread.selectLoop(NioThread.java:294)
+                                  com.hazelcast.internal.networking.nio.NioThread.executeRun(NioThread.java:249)
+                                  com.hazelcast.internal.util.executor.HazelcastManagedThread.run(HazelcastManagedThread.java:111)]]
+01-10-2025 11:09:31 1759316971203 Lifecycle[
+                          STARTING]
+01-10-2025 11:09:31 1759316971204 UnrecognisedEvent[]
+01-10-2025 11:09:31 1759316971205 SystemProperties[
+                          hazelcast.cluster.version.auto.upgrade.enabled=true
+                          hazelcast.config=/data/hazelcast/hazelcast.yaml
+                          hazelcast.diagnostics.directory=/data/diagnosticsoutput
+                          hazelcast.diagnostics.enabled=true
+                          hazelcast.diagnostics.filename.prefix=IN02-ocgtax01
+                          hazelcast.diagnostics.max.rolled.file.count=50
+                          hazelcast.diagnostics.max.rolled.file.size.mb=100
+                          hazelcast.graceful.shutdown.max.wait=60
+                          hazelcast.hotRestart=false
+                          hazelcast.jmx=true
+                          hazelcast.logging.shutdown=true
+                          hazelcast.logging.type=log4j2
+                          hazelcast.phone.home.enabled=false
+                          hazelcast.shutdownhook.enabled=true
+                          hazelcast.shutdownhook.policy=GRACEFUL
+                          hazelcast.socket.bind.any=true
+                          hazelcast.ssl=false
+                          hazelcast.tracking.server=true
+                          java.class.path=/opt/hazelcast/*:/opt/hazelcast/lib:/opt/hazelcast/lib/cache-api-1.1.1.jar:/opt/hazelcast/lib/hazelcast-distribution-5.5.5.jar:/opt/hazelcast/lib/hazelcast-enterprise-5.5.5.jar:/opt/hazelcast/lib/hazelcast-enterprise-cdc-debezium-5.5.5.jar:/opt/hazelcast/lib/hazelcast-enterprise-cdc-mysql-5.5.5.jar:/opt/hazelcast/lib/hazelcast-enterprise-cdc-postgres-5.5.5.jar:/opt/hazelcast/lib/hazelcast-enterprise-declarative-pipeline-5.5.5.jar:/opt/hazelcast/lib/hazelcast-enterprise-rest-5.5.5.jar:/opt/hazelcast/lib/hazelcast-enterprise-usercode-5.5.5.jar:/opt/hazelcast/lib/hazelcast-jet-avro-5.5.5.jar:/opt/hazelcast/lib/hazelcast-jet-csv-5.5.5.jar:/opt/hazelcast/lib/hazelcast-jet-elasticsearch-7-5.5.5.jar:/opt/hazelcast/lib/hazelcast-jet-files-azure-5.5.5.jar:/opt/hazelcast/lib/hazelcast-jet-files-gcs-5.5.5.jar:/opt/hazelcast/lib/hazelcast-jet-files-s3-5.5.5.jar:/opt/hazelcast/lib/hazelcast-jet-grpc-5.5.5.jar:/opt/hazelcast/lib/hazelcast-jet-hadoop-all-5.5.5.jar:/opt/hazelcast/lib/hazelcast-jet-kafka-5.5.5.jar:/opt/hazelcast/lib/hazelcast-jet-kafka-connect-5.5.5.jar:/opt/hazelcast/lib/hazelcast-jet-kinesis-5.5.5.jar:/opt/hazelcast/lib/hazelcast-jet-mongodb-5.5.5.jar:/opt/hazelcast/lib/hazelcast-jet-protobuf-5.5.5.jar:/opt/hazelcast/lib/hazelcast-jet-python-5.5.5.jar:/opt/hazelcast/lib/hazelcast-jet-s3-5.5.5.jar:/opt/hazelcast/lib/hazelcast-mapstore-5.5.5.jar:/opt/hazelcast/lib/hazelcast-sql-5.5.5.jar:/opt/hazelcast/lib/hazelcast-wm-5.0.jar:/opt/hazelcast/lib/jansi-2.4.1.jar:/opt/hazelcast/lib/jline-native-3.26.2.jar:/opt/hazelcast/lib/jline-reader-3.26.2.jar:/opt/hazelcast/lib/jline-terminal-3.26.2.jar:/opt/hazelcast/lib/jline-terminal-jansi-3.26.2.jar:/opt/hazelcast/lib/jmx_prometheus_javaagent-0.20.0.jar:/opt/hazelcast/lib/log4j-api-2.23.1.jar:/opt/hazelcast/lib/log4j-core-2.23.1.jar:/opt/hazelcast/lib/log4j-layout-template-json-2.23.1.jar:/opt/hazelcast/lib/log4j-slf4j2-impl-2.23.1.jar:/opt/hazelcast/lib/picocli-4.7.6.jar:/opt/hazelcast/lib/slf4j-api-2.0.13.jar:/opt/hazelcast/bin/user-lib:/opt/hazelcast/bin/user-lib/*
+                          java.class.version=65.0
+                          java.home=/usr/lib/jvm/java-21-openjdk-21.0.7.0.6-1.el9.x86_64
+                          java.io.tmpdir=/tmp
+                          java.library.path=/usr/java/packages/lib:/usr/lib64:/lib64:/lib:/usr/lib
+                          java.net.preferIPv4Stack=true
+                          java.runtime.name=OpenJDK Runtime Environment
+                          java.runtime.version=21.0.7+6-LTS
+                          java.security.egd=file:/dev/urandom
+                          java.specification.name=Java Platform API Specification
+                          java.specification.vendor=Oracle Corporation
+                          java.specification.version=21
+                          java.vendor=Red Hat, Inc.
+                          java.vendor.url=https://www.redhat.com/
+                          java.vendor.url.bug=https://access.redhat.com/support/cases/
+                          java.vendor.version=(Red_Hat-21.0.7.0.6-1)
+                          java.version=21.0.7
+                          java.version.date=2025-04-15
+                          java.vm.args=--add-modules=java.se --add-exports=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.management/sun.management=ALL-UNNAMED --add-opens=jdk.management/com.sun.management.internal=ALL-UNNAMED -Dlog4j.shutdownHookEnabled=false -Dhazelcast.logging.shutdown=true -Dhazelcast.logging.type=log4j2 -Dlog4j.configurationFile=file:/opt/hazelcast/config/log4j2.properties -Dhazelcast.config=/opt/hazelcast/config/hazelcast-docker.xml -javaagent:/opt/hazelcast/lib/jmx_prometheus_javaagent-0.20.0.jar=8080:/opt/hazelcast/config/jmx_agent_config.yaml -Djava.net.preferIPv4Stack=true -XX:MaxRAMPercentage=80.0 -Dhazelcast.socket.bind.any=true -Xmx9G -Xms9G -XX:-UseParallelGC -XX:+UseG1GC -Dhazelcast.config=/data/hazelcast/hazelcast.yaml -XX:+UnlockDiagnosticVMOptions -XX:+UseAES -XX:+UseAESIntrinsics -Dhazelcast.logging.type=log4j2 -Dlog4j.configurationFile=/data/loggingconfig/log4j2.properties -Dlog4j2.formatMsgNoLookups=true -Dhazelcast.phone.home.enabled=false -Djava.security.egd=file:/dev/urandom -DserviceName=hazelcastimdg-all -Dnamespace=grid-integration-in02 -Dhazelcast.ssl=false -Dhazelcast.hotRestart=false -Dhazelcast.shutdownhook.policy=GRACEFUL -Dhazelcast.shutdownhook.enabled=true -Dhazelcast.graceful.shutdown.max.wait=60 -Dhazelcast.cluster.version.auto.upgrade.enabled=true -Dhazelcast.jmx=true -Dhazelcast.diagnostics.enabled=true -Dhazelcast.diagnostics.directory=/data/diagnosticsoutput -Dhazelcast.diagnostics.filename.prefix=IN02-ocgtax01 -Dhazelcast.diagnostics.max.rolled.file.size.mb=100 -Dhazelcast.diagnostics.max.rolled.file.count=50
+                          java.vm.compressedOopsMode=Zero based
+                          java.vm.info=mixed mode, sharing
+                          java.vm.name=OpenJDK 64-Bit Server VM
+                          java.vm.specification.name=Java Virtual Machine Specification
+                          java.vm.specification.vendor=Oracle Corporation
+                          java.vm.specification.version=21
+                          java.vm.vendor=Red Hat, Inc.
+                          java.vm.version=21.0.7+6-LTS
+                          os.arch=amd64
+                          os.name=Linux
+                          os.version=5.14.0-427.72.1.el9_4.x86_64
+                          sun.arch.data.model=64
+                          sun.boot.library.path=/usr/lib/jvm/java-21-openjdk-21.0.7.0.6-1.el9.x86_64/lib
+                          sun.cpu.endian=little
+                          sun.io.unicode.encoding=UnicodeLittle
+                          sun.java.command=com.hazelcast.commandline.HazelcastServerCommandLine start
+                          sun.java.launcher=SUN_STANDARD
+                          sun.jnu.encoding=UTF-8
+                          sun.management.compiler=HotSpot 64-Bit Tiered Compilers
+                          sun.net.httpserver.maxReqTime=60
+                          sun.net.httpserver.maxRspTime=600]
+01-10-2025 11:09:31 1759316971206 ConfigProperties[
+                          hazelcast.addon.cluster.expiration.jmx-use-hazelcast-object-name=true
+                          hazelcast.diagnostics.event.queue.period.seconds=60
+                          hazelcast.diagnostics.event.queue.samples=100
+                          hazelcast.diagnostics.event.queue.threshold=1000
+                          hazelcast.diagnostics.invocation-profiler.period.seconds=60
+                          hazelcast.diagnostics.invocation.sample.period.seconds=60
+                          hazelcast.diagnostics.member-heartbeat.max-deviation-percentage=100
+                          hazelcast.diagnostics.member-heartbeat.seconds=10
+                          hazelcast.diagnostics.memberinfo.period.seconds=60
+                          hazelcast.diagnostics.metric.level=info
+                          hazelcast.diagnostics.metrics.period.seconds=60
+                          hazelcast.diagnostics.operation-heartbeat.max-deviation-percentage=33
+                          hazelcast.diagnostics.operation-heartbeat.seconds=10
+                          hazelcast.diagnostics.operation-profiler.period.seconds=5
+                          hazelcast.diagnostics.operationthreadsamples.includeName=false
+                          hazelcast.diagnostics.operationthreadsamples.period.seconds=120
+                          hazelcast.diagnostics.operationthreadsamples.sampler.period.millis=500
+                          hazelcast.diagnostics.pending.invocations.period.seconds=60
+                          hazelcast.diagnostics.slowoperations.period.seconds=60
+                          hazelcast.diagnostics.storeLatency.period.seconds=0
+                          hazelcast.diagnostics.storeLatency.reset.period.seconds=0
+                          hazelcast.diagnostics.systemlog.enabled=true
+                          hazelcast.diagnostics.systemlog.partitions=false
+                          hazelcast.diagnostics.wan.period.seconds=60
+                          hazelcast.heartbeat.interval.seconds=10
+                          hazelcast.merge.first.run.delay.seconds=300
+                          hazelcast.merge.next.run.delay.seconds=15
+                          hazelcast.operation.thread.count=8
+                          hazelcast.partition.count=293
+                          hazelcast.socket.keep.alive=true]
+01-10-2025 11:09:31 1759316971207 Metric[[metric=classloading.totalLoadedClassesCount]=11741]
+01-10-2025 11:09:31 1759316971208 Metric[[cooperativeWorker=7,unit=count,metric=taskletCount,module=jet]=0]
+01-10-2025 11:09:31 1759316971209 Metric[[thread=hz.quizzical_blackwell.partition-operation.thread-6,unit=count,metric=operation.thread.errorCount]=0]
+01-10-2025 11:09:31 1759316971210 Metric[[metric=thread.daemonThreadCount]=13]
+
+
+
+01-10-2025 11:09:31 1759316971211 Metric[[unit=bytes,metric=memory.freeNative]=9663212848]
+
+
+01-10-2025 11:09:56 1759316971212 OperationsProfiler[
+                         com.hazelcast.map.impl.operation.MapClearExpiredOperation[
+                                  count=24
+                                  totalTime(us)=151,635
+                                  avg(us)=6,318
+                                  max(us)=16,072
+                                  latency-distribution[
+                                          1024..2047us=1
+                                          2048..4095us=7
+                                          4096..8191us=9
+                                          8192..16383us=7]]
+                         com.hazelcast.internal.locksupport.operations.IsLockedOperation[
+                                  count=82
+                                  totalTime(us)=2,042
+                                  avg(us)=24
+                                  max(us)=106
+                                  latency-distribution[
+                                          8..15us=22
+                                          16..31us=41
+                                          32..63us=16
+                                          64..127us=3]]]
+01-10-2025 11:09:56 1759316971213 OperationsProfiler[
+                          com.hazelcast.internal.locksupport.operations.IsLockedOperation[
+                                  count=82
+                                  totalTime(us)=2,042
+                                  avg(us)=24
+                                  max(us)=106
+                                  latency-distribution[]]]
+01-10-2025 11:11:01 1759316971214 OperationHeartbeat[
+                          member[16.239.30.43]:47247[
+                                  deviation(%)=52.459999084472656
+                                  noHeartbeat(ms)=22,869
+                                  lastHeartbeat(ms)=1,759,317,038,346
+                                  lastHeartbeat(date-time)=01-10-2025 11:10:38
+                                  now(ms)=1,759,317,061,215
+                                  now(date-time)=01-10-2025 11:11:01]]

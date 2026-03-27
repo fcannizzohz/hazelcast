@@ -45,6 +45,11 @@ public class DiagnosticsLogConverter {
     private static final String TOP_LEVEL_PATTERN_STR =
             "^(\\d{2}-\\d{2}-\\d{4} \\d{2}:\\d{2}:\\d{2}) (?:(\\d+) )?(.+)\\[\\]?$";
     private static final Pattern TOP_LEVEL_PATTERN = Pattern.compile(TOP_LEVEL_PATTERN_STR);
+    // Matches single-line entries: "date [epoch] Name[content]" — all on one line.
+    // Used as a fallback when TOP_LEVEL_PATTERN fails (e.g. MetricsPlugin writeSectionKeyValue output).
+    private static final Pattern TOP_LEVEL_INLINE_PATTERN = Pattern.compile(
+            "^(\\d{2}-\\d{2}-\\d{4} \\d{2}:\\d{2}:\\d{2}) (?:(\\d+) )?([^\\[]+)\\[(.+)\\]$");
+    private static final int INLINE_GROUP_CONTENT = 4;
     private static final String INDENT = "                          ";
     private static final int INDENT_BASE = 26;
     private static final int DEPTH_INDENT_SIZE = 8;
@@ -89,8 +94,26 @@ public class DiagnosticsLogConverter {
 
         Matcher matcher = TOP_LEVEL_PATTERN.matcher(lines[0]);
         if (!matcher.matches()) {
-            LOGGER.severe("Failed to parse diagnostics entry metadata (first line): " + lines[0]);
-            return null;
+            // Fallback: try single-line format "date [epoch] Name[content]"
+            Matcher inlineMatcher = TOP_LEVEL_INLINE_PATTERN.matcher(lines[0]);
+            if (!inlineMatcher.matches()) {
+                LOGGER.severe("Failed to parse diagnostics entry metadata (first line): " + lines[0]);
+                return null;
+            }
+            DiagnosticEntry entry = new DiagnosticEntry();
+            entry.time = inlineMatcher.group(1);
+            String epochStr = inlineMatcher.group(2);
+            if (epochStr != null) {
+                entry.epoch = Long.parseLong(epochStr);
+            } else {
+                entry.epoch = deriveEpochFromTime(entry.time);
+            }
+            entry.name = unescape(inlineMatcher.group(3).trim());
+            String inlineContent = inlineMatcher.group(INLINE_GROUP_CONTENT);
+            if (!inlineContent.isEmpty()) {
+                parseValueLine(inlineContent, entry.content);
+            }
+            return entry;
         }
 
         DiagnosticEntry entry = new DiagnosticEntry();
@@ -197,7 +220,7 @@ public class DiagnosticsLogConverter {
     }
 
     private void parseValueLine(String temp, Map<String, Object> content) {
-        int eqIndex = findUnescaped(temp, '=');
+        int eqIndex = findKeyValueSplitIndex(temp);
         if (eqIndex != -1) {
             String key = unescape(temp.substring(0, eqIndex).trim());
             String value = temp.substring(eqIndex + 1).trim();
@@ -285,6 +308,39 @@ public class DiagnosticsLogConverter {
             list.add(value);
             content.put(key, list);
         }
+    }
+
+    /**
+     * Finds the index of the {@code =} that separates the key from the value in a
+     * STANDARD-format key=value line.  Handles bracket-notation keys such as
+     * {@code [metric=classloading.totalLoadedClassesCount]=11741}: when {@code temp}
+     * starts with {@code [}, it finds the matching closing {@code ]} and returns the
+     * index of the {@code =} that immediately follows.  Falls back to
+     * {@link #findUnescaped} for plain (non-bracket) keys.
+     */
+    private int findKeyValueSplitIndex(String temp) {
+        if (!temp.isEmpty() && temp.charAt(0) == '[') {
+            return findEqAfterBracketKey(temp);
+        }
+        return findUnescaped(temp, '=');
+    }
+
+    /** Finds the {@code =} that follows the bracket-notation key's closing {@code ]}. */
+    private static int findEqAfterBracketKey(String temp) {
+        int depth = 0;
+        for (int i = 0; i < temp.length(); i++) {
+            char c = temp.charAt(i);
+            if (c == '[') {
+                depth++;
+            } else if (c == ']') {
+                depth--;
+                if (depth == 0) {
+                    boolean hasEqNext = i + 1 < temp.length() && temp.charAt(i + 1) == '=';
+                    return hasEqNext ? i + 1 : -1;
+                }
+            }
+        }
+        return -1;
     }
 
     private int findUnescaped(String s, char target) {

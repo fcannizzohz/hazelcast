@@ -50,20 +50,30 @@ import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 
+import java.io.BufferedReader;
 import java.io.CharArrayWriter;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.lang.reflect.Field;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Pattern;
 
 import static com.hazelcast.test.Accessors.getNodeEngineImpl;
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -340,5 +350,264 @@ public class DiagnosticsConverterRoundTripTest extends HazelcastTestSupport {
         }
         String trimmed = standard.trim();
         return trimmed.isEmpty() || trimmed.endsWith("[]");
+    }
+
+    // -------------------------------------------------------------------------
+    // Sample log file round-trip
+    // -------------------------------------------------------------------------
+
+    /** Matches the first line of any STANDARD diagnostics entry. */
+    private static final Pattern ENTRY_HEADER =
+            Pattern.compile("^\\d{2}-\\d{2}-\\d{4} \\d{2}:\\d{2}:\\d{2}.*");
+
+    /**
+     * Reads the sample log file from the test classpath, splits it into individual
+     * STANDARD-format entry blocks (each block starts with a date/time header line),
+     * and performs a STANDARD → parseStandard → toJson → parseJson → toStandard
+     * round-trip on every non-trivial entry.
+     * <p>
+     * Comparison is semantic: the {@link DiagnosticsLogConverter.DiagnosticEntry#getContent()}
+     * map from the first parse is diffed against the map from the re-parsed entry so that
+     * type-normalisation differences (e.g. comma-stripped longs) surface as specific field
+     * paths rather than opaque string mismatches.  When the maps agree the test passes;
+     * when they differ the assertion message names every divergent path and shows both values.
+     */
+    @Test
+    public void testSampleLogFile_semanticRoundTrip() throws IOException {
+        List<String> entries = readEntriesFromResource(
+                "/com/hazelcast/internal/diagnostics/0.diagnostics.sample.log");
+
+        List<String> failures = new ArrayList<>();
+        int tested = 0;
+        int skipped = 0;
+
+        for (String entry : entries) {
+            if (isTrivialOutput(entry)) {
+                skipped++;
+                continue;
+            }
+            String failure = checkSemanticRoundTrip(entry);
+            if (failure != null) {
+                failures.add(failure);
+            }
+            tested++;
+        }
+
+        if (!failures.isEmpty()) {
+            StringBuilder msg = new StringBuilder();
+            msg.append(failures.size()).append("/").append(tested)
+               .append(" entries failed semantic round-trip (")
+               .append(skipped).append(" trivial entries skipped):\n");
+            for (int i = 0; i < failures.size(); i++) {
+                msg.append("\n══ Failure ").append(i + 1).append(" ══\n");
+                msg.append(failures.get(i));
+            }
+            fail(msg.toString());
+        }
+    }
+
+    /**
+     * Performs the full round-trip for one entry and returns a human-readable
+     * failure description, or {@code null} if the entry round-trips cleanly.
+     */
+    private String checkSemanticRoundTrip(String standard) {
+        DiagnosticsLogConverter.DiagnosticEntry e1 = converter.parseStandard(standard);
+        if (e1 == null) {
+            return "parseStandard returned null\nInput:\n" + standard;
+        }
+
+        String json = converter.toJson(e1);
+
+        DiagnosticsLogConverter.DiagnosticEntry e2 = converter.parseJson(json);
+        if (e2 == null) {
+            return "parseJson returned null\nJSON:\n" + json + "\nOriginal STANDARD:\n" + standard;
+        }
+
+        // Semantic comparison of the content maps
+        List<String> diffs = new ArrayList<>();
+        diffValues("content", e1.getContent(), e2.getContent(), diffs);
+
+        if (diffs.isEmpty()) {
+            return null;
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("name=").append(e1.getName())
+          .append("  epoch=").append(e1.getEpoch()).append("\n");
+        sb.append("Semantic differences (").append(diffs.size()).append("):\n");
+        for (String d : diffs) {
+            sb.append("  ").append(d).append("\n");
+        }
+        sb.append("Original STANDARD:\n").append(standard);
+        sb.append("Intermediate JSON:\n").append(json).append("\n");
+        return sb.toString();
+    }
+
+    /**
+     * Recursively diffs two values at the given path and appends any divergences
+     * to {@code out}.  Maps are compared key-by-key; lists element-by-element;
+     * primitives are compared after numeric normalisation (a comma-grouped string
+     * like {@code "22,869"} is equal to the long {@code 22869}).
+     */
+    @SuppressWarnings("unchecked")
+    private static void diffValues(String path, Object expected, Object actual,
+                                   List<String> out) {
+        if (expected == null && actual == null) {
+            return;
+        }
+        // Unwrap {text:"X"} entries-array items: toJson wraps plain writeEntry() strings
+        // as {"text":"..."} objects; parseStandard keeps them as plain Strings.
+        // Both representations are semantically equivalent.
+        Object normExpected = unwrapTextEntry(expected);
+        Object normActual   = unwrapTextEntry(actual);
+        if (normExpected instanceof Map && normActual instanceof Map) {
+            diffMaps(path, (Map<String, Object>) normExpected, (Map<String, Object>) normActual, out);
+            return;
+        }
+        if (normExpected instanceof List && normActual instanceof List) {
+            diffLists(path, (List<Object>) normExpected, (List<Object>) normActual, out);
+            return;
+        }
+        // Normalise numbers before reporting a mismatch
+        Object ne = normalise(normExpected);
+        Object na = normalise(normActual);
+        if (!ne.equals(na)) {
+            out.add(path + ": expected <" + expected + "> (" + typeName(expected)
+                    + ") but got <" + actual + "> (" + typeName(actual) + ")");
+        }
+    }
+
+    /**
+     * If {@code v} is a {@code Map} with a single {@code "text"} key, returns the
+     * text value as a plain {@code String}.  Otherwise returns {@code v} unchanged.
+     * This normalises the difference between {@code parseStandard} (stores plain
+     * {@code writeEntry()} values as Strings) and {@code parseJson} (stores them as
+     * {@code {"text":"..."}} objects after the JSON round-trip).
+     */
+    @SuppressWarnings("unchecked")
+    private static Object unwrapTextEntry(Object v) {
+        if (v instanceof Map) {
+            Map<String, Object> m = (Map<String, Object>) v;
+            if (m.size() == 1 && m.containsKey("text")) {
+                Object text = m.get("text");
+                if (text instanceof String) {
+                    return text;
+                }
+            }
+        }
+        return v;
+    }
+
+    private static void diffMaps(String path, Map<String, Object> expected,
+                                  Map<String, Object> actual, List<String> out) {
+        for (Map.Entry<String, Object> entry : expected.entrySet()) {
+            String key = entry.getKey();
+            if (!actual.containsKey(key)) {
+                out.add(path + "." + key + ": missing in round-trip (was <" + entry.getValue() + ">)");
+            } else {
+                diffValues(path + "." + key, entry.getValue(), actual.get(key), out);
+            }
+        }
+        for (String key : actual.keySet()) {
+            if (!expected.containsKey(key)) {
+                out.add(path + "." + key + ": extra key in round-trip (value <" + actual.get(key) + ">)");
+            }
+        }
+    }
+
+    private static void diffLists(String path, List<Object> expected,
+                                   List<Object> actual, List<String> out) {
+        if (expected.size() != actual.size()) {
+            out.add(path + ": list size differs — expected " + expected.size()
+                    + " but got " + actual.size()
+                    + "\n    expected: " + expected
+                    + "\n    actual:   " + actual);
+            return;
+        }
+        for (int i = 0; i < expected.size(); i++) {
+            diffValues(path + "[" + i + "]", expected.get(i), actual.get(i), out);
+        }
+    }
+
+    /**
+     * Normalises a value to a canonical {@code Long} or {@code Double} where possible
+     * so that {@code "22,869"} (STANDARD comma-grouped string) compares equal to
+     * {@code 22869L} (the same value parsed as a long after round-trip).
+     */
+    private static Object normalise(Object v) {
+        if (v == null) {
+            return "null";
+        }
+        if (v instanceof String) {
+            String s = ((String) v).replace(",", "");
+            try {
+                return Long.parseLong(s);
+            } catch (NumberFormatException ignored) { }
+            try {
+                return Double.parseDouble(s);
+            } catch (NumberFormatException ignored) { }
+        }
+        return v;
+    }
+
+    private static String typeName(Object v) {
+        return v == null ? "null" : v.getClass().getSimpleName();
+    }
+
+    /**
+     * Reads the given classpath resource and splits it into individual STANDARD
+     * diagnostics entry blocks.  Each block starts with a line matching the
+     * {@code dd-MM-yyyy HH:mm:ss} header pattern; blank lines between blocks
+     * are discarded.
+     */
+    private List<String> readEntriesFromResource(String resourcePath) throws IOException {
+        List<String> entries = new ArrayList<>();
+        InputStream is = getClass().getResourceAsStream(resourcePath);
+        assertNotNull("resource not found: " + resourcePath, is);
+
+        List<String> currentBlock = new ArrayList<>();
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(is, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (ENTRY_HEADER.matcher(line).matches()) {
+                    // Flush previous block
+                    String block = joinBlock(currentBlock);
+                    if (!block.isEmpty()) {
+                        entries.add(block);
+                    }
+                    currentBlock.clear();
+                    currentBlock.add(line);
+                } else if (!currentBlock.isEmpty()) {
+                    // Continuation line for the current block (blank lines included
+                    // so the converter sees them; leading blank lines before the
+                    // first header are dropped)
+                    currentBlock.add(line);
+                }
+            }
+        }
+        // Flush last block
+        String block = joinBlock(currentBlock);
+        if (!block.isEmpty()) {
+            entries.add(block);
+        }
+        return entries;
+    }
+
+    private static String joinBlock(List<String> lines) {
+        if (lines.isEmpty()) {
+            return "";
+        }
+        // Trim trailing blank lines, then re-join with the system line separator
+        // that the STANDARD writer uses.
+        int last = lines.size() - 1;
+        while (last > 0 && lines.get(last).isBlank()) {
+            last--;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i <= last; i++) {
+            sb.append(lines.get(i)).append(System.lineSeparator());
+        }
+        return sb.toString();
     }
 }
