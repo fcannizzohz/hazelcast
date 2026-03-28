@@ -146,7 +146,7 @@ JSON `null` appears in two cases:
 | Java type | JSON encoding |
 |---|---|
 | `long` / `int` | integer (no decimal point, no quotes) |
-| `double` / `float` | number (may include decimal point; `NaN` is written as the token `NaN`) |
+| `double` / `float` | number (may include decimal point) |
 | `boolean` | `true` / `false` (no quotes) |
 | `String` | double-quoted, JSON-escaped |
 
@@ -919,31 +919,57 @@ interface MemberAddressEntry {
 
 ```typescript
 interface InvocationsContent {
-  Pending:     PendingSection;
-  History:     SampleHistorySection;
-  SlowHistory: SampleHistorySection;
+  Pending?:     PendingInvocation[];   // array; absent when no slow invocations
+  History?:     SampleEntry[];         // array; absent when no occurrences
+  SlowHistory?: SampleEntry[];         // array; absent when no slow occurrences
 }
-interface PendingSection {
-  entries?: (SlowInvocationEntry | TextEntry)[];
-  // TextEntry items: only the sentinel {"text":"max number of invocations to print reached."}
+
+interface PendingInvocation {
+  Invocation: {
+    class:            string;    // fully-qualified operation class name
+    serviceName:      string | null;
+    identityHash:     number;
+    partitionId:      number;
+    replicaIndex:     number;
+    callId:           number;
+    invocationTimeMs: number;    // epoch ms
+    invocationTime:   string;    // "yyyy-MM-dd HH:mm:ss.SSS"
+    waitTimeout:      number;
+    callTimeout:      number;
+    tenantControl:    string;
+  };
+  tryCount:             number;
+  tryPauseMillis:       number;
+  invokeCount:          number;
+  callTimeoutMillis:    number;
+  firstInvocationTimeMs: number;
+  firstInvocationTime:  string;    // "yyyy-MM-dd HH:mm:ss.SSS"
+  lastHeartbeatMillis:  number;
+  lastHeartbeatTime:    string;    // "yyyy-MM-dd HH:mm:ss.SSS"
+  targetAddress:        string | null;
+  targetMember:         string | null;
+  memberListVersion:    number;
+  pendingResponse:      string;    // e.g. "{VOID}", "{CALL_TIMEOUT}"
+  backupsAcksExpected:  number;
+  backupsAcksReceived:  number;
+  connection:           string | null;
+  durationMs:           number;
+  // overflow sentinel: {"warning":"max number of invocations to print reached."}
 }
-interface SlowInvocationEntry {
-  description: string;   // invocation.toString()
-  duration:    number;   // milliseconds
-  unit:        "ms";     // always the literal string "ms"
-}
-interface SampleHistorySection {
-  entries?: SampleEntry[];
-}
-interface SampleEntry {
-  operation: string;   // fully-qualified operation class name
-  samples:   number;
-}
+
+// Each SampleEntry is a single-key object: { "<fully-qualified-class-name>": count }
+type SampleEntry = Record<string, number>;
 ```
 
 ```json
-{"epoch":1710849600000,"name":"Invocations","content":{"Pending":{"entries":[{"description":"BasicInvocation{op=PutOperation, ...}","duration":12000,"unit":"ms"},{"text":"max number of invocations to print reached."}]},"History":{"entries":[{"operation":"com.hazelcast.map.impl.operation.PutOperation","samples":50}]},"SlowHistory":{"entries":[{"operation":"com.hazelcast.map.impl.operation.PutOperation","samples":2}]}}}
+{"epoch":1710849600000,"name":"Invocations","content":{"Pending":[{"Invocation":{"class":"com.hazelcast.map.impl.operation.PutOperation","serviceName":"hz:impl:mapService","identityHash":123456789,"partitionId":42,"replicaIndex":0,"callId":9001,"invocationTimeMs":1710849588000,"invocationTime":"2025-03-19 12:59:48.000","waitTimeout":-1,"callTimeout":60000,"tenantControl":"com.hazelcast.spi.impl.tenantcontrol.NoopTenantControl@0"},"tryCount":250,"tryPauseMillis":500,"invokeCount":1,"callTimeoutMillis":60000,"firstInvocationTimeMs":1710849588010,"firstInvocationTime":"2025-03-19 12:59:48.010","lastHeartbeatMillis":1710849599000,"lastHeartbeatTime":"2025-03-19 12:59:59.000","targetAddress":"[10.0.0.1]:5701","targetMember":"Member [10.0.0.1]:5701 - uuid this","memberListVersion":3,"pendingResponse":"{VOID}","backupsAcksExpected":-1,"backupsAcksReceived":0,"connection":null,"durationMs":12000}],"History":[{"com.hazelcast.map.impl.operation.PutOperation":50},{"com.hazelcast.map.impl.operation.GetOperation":12}],"SlowHistory":[{"com.hazelcast.map.impl.operation.PutOperation":2}]}}
 ```
+
+> **STANDARD vs JSON difference:** STANDARD wraps `Pending` and the history sections as
+> named sub-sections (objects). JSON renders each as a named array directly inside
+> `"content"`. The `"History"` and `"SlowHistory"` arrays use the operation class name as
+> the key in each single-key object rather than the `"operation"`/`"samples"` pair used
+> in the old structured-entry format.
 
 ---
 
@@ -989,8 +1015,8 @@ The following call sites use format-aware branching to emit structured JSON:
 | `MemberHazelcastInstanceInfoPlugin.run` | member addresses | `"address"` |
 | `PendingInvocationsPlugin.renderInvocations` | pending ops | `"operation"`, `"count"` |
 | `EventQueuePlugin.renderSamples` | event type samples | `"eventType"`, `"sampleCount"`, `"percentage"` |
-| `InvocationSamplePlugin.runCurrent` | slow pending invocations | `"description"`, `"duration"`, `"unit"` |
-| `InvocationSamplePlugin.renderOccurrences` | invocation samples | `"operation"`, `"samples"` |
+| `InvocationSamplePlugin.runCurrent` | slow pending invocations | each rendered as a `"Pending"` array item with a nested `"Invocation"` object (op fields) plus all invocation-level fields and `"durationMs"`; overflow as `{"warning":"..."}` |
+| `InvocationSamplePlugin.renderOccurrences` | `"History"` / `"SlowHistory"` | each rendered as a `"History"` / `"SlowHistory"` array item `{"<class>": count}` |
 | `OperationThreadSamplerPlugin.write` | thread samples | `"operation"`, `"samples"`, `"percentage"` |
 | `OverloadedConnectionsPlugin.renderJson` | connection array items | `"from"`, `"to"`, `"packetCount"`/`"urgentPacketCount"`, `"sampleCount"`, nested `"samples"` section |
 | `OverloadedConnectionsPlugin.renderSamples` | connection type samples | `"connectionType"`, `"sampleCount"`, `"percentage"` |
@@ -1058,7 +1084,7 @@ and the legacy property-based configuration can use it:
 config.getDiagnosticsConfig().setLogFormat(DiagnosticsLogFormat.JSON);
 
 // system property (legacy)
-hazelcast.diagnostics.format=JSON
+hazelcast.diagnostics.log.format=JSON
 ```
 
 `DiagnosticsConfig` stores the field and serializes it via
@@ -1642,15 +1668,22 @@ jq 'select(.name == "PendingInvocations") |
 # Invocations plugin — slow pending ops (duration in ms)
 jq 'select(.name == "Invocations") |
     .epoch as $e |
-    .content.Pending.entries // [] |
-    map(select(.duration != null)) |
-    sort_by(-.duration) |
-    .[] | {epoch: $e, duration_ms: .duration, description}' diag.log
+    .content.Pending // [] |
+    sort_by(-.durationMs) |
+    .[] | {epoch: $e, duration_ms: .durationMs, class: .Invocation.class}' diag.log
 
 # SlowHistory — which operation types have accumulated slow-invocation samples?
 jq 'select(.name == "Invocations") |
-    {epoch, slow_history: (.content.SlowHistory.entries // [])}' diag.log \
+    {epoch, slow_history: (.content.SlowHistory // [])}' diag.log \
   | jq 'select(.slow_history | length > 0)'
+
+# History — flatten to {epoch, class, samples} rows, sorted by samples desc
+jq 'select(.name == "Invocations") |
+    .epoch as $e |
+    .content.History // [] |
+    .[] | to_entries[] |
+    {epoch: $e, class: .key, samples: .value}' diag.log \
+  | jq -s 'sort_by(-.samples)'
 
 # InvocationProfiler — average and max latency per operation type
 jq 'select(.name == "InvocationProfiler") |

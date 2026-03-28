@@ -162,7 +162,7 @@ public class Diagnostics {
      * <li>{@link DiagnosticsLogFormat#JSON}: a single line JSON format</li>
      * </ul>
      */
-    public static final HazelcastProperty LOG_FORMAT = new HazelcastProperty("hazelcast.diagnostics.format",
+    public static final HazelcastProperty LOG_FORMAT = new HazelcastProperty("hazelcast.diagnostics.log.format",
             DiagnosticsLogFormat.STANDARD);
 
     /**
