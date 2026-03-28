@@ -764,8 +764,32 @@ public abstract class Invocation<T> extends BaseInvocation implements OperationR
         return targetMember;
     }
 
-    int getMemberListVersion() {
+    public int getMemberListVersion() {
         return memberListVersion;
+    }
+
+    public int getTryCount() {
+        return tryCount;
+    }
+
+    public long getTryPauseMillis() {
+        return tryPauseMillis;
+    }
+
+    public int getInvokeCount() {
+        return invokeCount;
+    }
+
+    public long getLastHeartbeatMillis() {
+        return lastHeartbeatMillis;
+    }
+
+    public long getCallTimeoutMillis() {
+        return callTimeoutMillis;
+    }
+
+    public String getConnectionDesc() {
+        return connection != null ? connection.toString() : null;
     }
 
     @Override

@@ -16,15 +16,18 @@
 
 package com.hazelcast.internal.diagnostics;
 
+import com.hazelcast.cluster.Member;
 import com.hazelcast.internal.util.Clock;
 import com.hazelcast.internal.util.ItemCounter;
 import com.hazelcast.logging.ILogger;
+import com.hazelcast.spi.impl.operationservice.Operation;
 import com.hazelcast.spi.impl.operationservice.impl.Invocation;
 import com.hazelcast.spi.impl.operationservice.impl.InvocationRegistry;
 import com.hazelcast.spi.properties.HazelcastProperties;
 import com.hazelcast.spi.properties.HazelcastProperty;
 
 import static com.hazelcast.internal.diagnostics.OperationDescriptors.toOperationDesc;
+import static com.hazelcast.internal.util.StringUtil.timeToString;
 import static java.util.concurrent.TimeUnit.SECONDS;
 
 /**
@@ -125,10 +128,13 @@ public class InvocationSamplePlugin extends DiagnosticsPlugin {
     }
 
     private void runCurrent(DiagnosticsLogWriter writer, long now) {
-        writer.startSection("Pending");
+        boolean isJson = writer.getFormat() == DiagnosticsLogFormat.JSON;
+        if (!isJson) {
+            writer.startSection("Pending");
+        }
         int count = 0;
         boolean maxPrinted = false;
-        for (Invocation invocation : invocationRegistry) {
+        for (Invocation<?> invocation : invocationRegistry) {
             long durationMs = now - invocation.firstInvocationTimeMillis;
             String operationDesc = toOperationDesc(invocation.op);
             occurrences.add(operationDesc, 1);
@@ -141,29 +147,82 @@ public class InvocationSamplePlugin extends DiagnosticsPlugin {
             // it is a slow invocation
             count++;
             if (count < maxCount) {
-                if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
-                    writer.writeStructuredEntry("description", invocation.toString(), "duration", durationMs, "unit", "ms");
+                if (isJson) {
+                    writeInvocationJsonItem(writer, invocation, durationMs);
                 } else {
                     writer.writeEntry(invocation + " duration=" + durationMs + " ms");
                 }
             } else if (!maxPrinted) {
                 maxPrinted = true;
-                writer.writeEntry("max number of invocations to print reached.");
+                if (isJson) {
+                    writer.startArrayItemSection("Pending");
+                    writer.writeKeyValueEntry("warning", "max number of invocations to print reached.");
+                    writer.endArrayItemSection();
+                } else {
+                    writer.writeEntry("max number of invocations to print reached.");
+                }
             }
             slowOccurrences.add(operationDesc, 1);
         }
+        if (!isJson) {
+            writer.endSection();
+        }
+    }
+
+    private void writeInvocationJsonItem(DiagnosticsLogWriter writer, Invocation<?> invocation, long durationMs) {
+        writer.startArrayItemSection("Pending");
+
+        Operation op = invocation.op;
+        writer.startSection("Invocation");
+        writer.writeKeyValueEntry("class", op.getClass().getName());
+        writer.writeKeyValueEntry("serviceName", op.getServiceName());
+        writer.writeKeyValueEntry("identityHash", System.identityHashCode(op));
+        writer.writeKeyValueEntry("partitionId", op.getPartitionId());
+        writer.writeKeyValueEntry("replicaIndex", op.getReplicaIndex());
+        writer.writeKeyValueEntry("callId", op.getCallId());
+        writer.writeKeyValueEntry("invocationTimeMs", op.getInvocationTime());
+        writer.writeKeyValueEntry("invocationTime", timeToString(op.getInvocationTime()));
+        writer.writeKeyValueEntry("waitTimeout", op.getWaitTimeout());
+        writer.writeKeyValueEntry("callTimeout", op.getCallTimeout());
+        writer.writeKeyValueEntry("tenantControl", op.getTenantControlOrNoop().toString());
         writer.endSection();
+
+        writer.writeKeyValueEntry("tryCount", invocation.getTryCount());
+        writer.writeKeyValueEntry("tryPauseMillis", invocation.getTryPauseMillis());
+        writer.writeKeyValueEntry("invokeCount", invocation.getInvokeCount());
+        writer.writeKeyValueEntry("callTimeoutMillis", invocation.getCallTimeoutMillis());
+        writer.writeKeyValueEntry("firstInvocationTimeMs", invocation.firstInvocationTimeMillis);
+        writer.writeKeyValueEntry("firstInvocationTime", timeToString(invocation.firstInvocationTimeMillis));
+        long lastHb = invocation.getLastHeartbeatMillis();
+        writer.writeKeyValueEntry("lastHeartbeatMillis", lastHb);
+        writer.writeKeyValueEntry("lastHeartbeatTime", timeToString(lastHb));
+        Member targetMember = invocation.getTargetMember();
+        writer.writeKeyValueEntry("targetAddress",
+                invocation.getTargetAddress() != null ? invocation.getTargetAddress().toString() : null);
+        writer.writeKeyValueEntry("targetMember", targetMember != null ? targetMember.toString() : null);
+        writer.writeKeyValueEntry("memberListVersion", invocation.getMemberListVersion());
+        writer.writeKeyValueEntry("pendingResponse", invocation.getPendingResponseDesc());
+        writer.writeKeyValueEntry("backupsAcksExpected", invocation.getBackupsAcksExpected());
+        writer.writeKeyValueEntry("backupsAcksReceived", invocation.getBackupsAcksReceived());
+        writer.writeKeyValueEntry("connection", invocation.getConnectionDesc());
+        writer.writeKeyValueEntry("durationMs", durationMs);
+
+        writer.endArrayItemSection();
     }
 
     private void renderOccurrences(DiagnosticsLogWriter writer, String sectionName, ItemCounter<String> counter) {
-        writer.startSection(sectionName);
-        for (String item : counter.descendingKeys()) {
-            if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
-                writer.writeStructuredEntry("operation", item, "samples", counter.get(item));
-            } else {
+        if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+            for (String item : counter.descendingKeys()) {
+                writer.startArrayItemSection(sectionName);
+                writer.writeKeyValueEntry(item, counter.get(item));
+                writer.endArrayItemSection();
+            }
+        } else {
+            writer.startSection(sectionName);
+            for (String item : counter.descendingKeys()) {
                 writer.writeEntry(item + " samples=" + counter.get(item));
             }
+            writer.endSection();
         }
-        writer.endSection();
     }
 }

@@ -118,21 +118,24 @@ public class SlowOperationPlugin extends DiagnosticsPlugin {
     }
 
     private void renderInvocations(DiagnosticsLogWriter writer, SlowOperationDTO slowOperation) {
-        writer.startSection("slowInvocations");
-        for (SlowOperationInvocationDTO invocation : slowOperation.invocations) {
-            if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
-                writer.writeStructuredEntry(
-                        "startedAt", invocation.startedAt,
-                        "duration(ms)", invocation.durationMs,
-                        "operationDetails", invocation.operationDetails);
-            } else {
+        if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+            for (SlowOperationInvocationDTO invocation : slowOperation.invocations) {
+                writer.startArrayItemSection("slowInvocations");
+                writer.writeKeyValueEntry("startedAt", invocation.startedAt);
+                writer.writeKeyValueEntry("duration(ms)", invocation.durationMs);
+                writer.writeKeyValueEntry("operationDetails", invocation.operationDetails);
+                writer.endArrayItemSection();
+            }
+        } else {
+            writer.startSection("slowInvocations");
+            for (SlowOperationInvocationDTO invocation : slowOperation.invocations) {
                 writer.writeKeyValueEntry("startedAt", invocation.startedAt);
                 writer.writeKeyValueEntryAsDateTime("started(date-time)", invocation.startedAt);
                 writer.writeKeyValueEntry("duration(ms)", invocation.durationMs);
                 writer.writeKeyValueEntry("operationDetails", invocation.operationDetails);
             }
+            writer.endSection();
         }
-        writer.endSection();
     }
 
     private void renderStackTrace(DiagnosticsLogWriter writer, SlowOperationDTO slowOperation) {

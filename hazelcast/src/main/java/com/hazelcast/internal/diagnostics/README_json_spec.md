@@ -138,8 +138,8 @@ JSON `null` appears in two cases:
 - `writeKeyValueEntry(key, (String) null)` — used by `MetricsPlugin.collectNoValue`
   when a metric was registered but had no value at collection time (e.g.
   `"os.cpu.load": null`). In STANDARD format the same case writes `"NA"`.
-- `writeStructuredEntry` with a null value argument — e.g. `operationDetails`
-  in `slowInvocations` when the operation details string is absent.
+- `writeKeyValueEntry(key, (String) null)` in array items — e.g. `operationDetails`
+  in a `slowInvocations` array item when the operation details string is absent.
 
 ### Numeric types
 
@@ -352,9 +352,7 @@ interface SlowOperationEntry {
   stackTrace: {
     entries?: StackLineEntry[];
   };
-  slowInvocations: {
-    entries?: InvocationEntry[];
-  };
+  slowInvocations?: InvocationEntry[];   // array; absent when no invocations
 }
 
 interface StackLineEntry {
@@ -378,11 +376,9 @@ interface InvocationEntry {
         { "line": "at com.hazelcast.spi.impl.operationexecutor.impl.OperationThread.run(OperationThread.java:176)" }
       ]
     },
-    "slowInvocations": {
-      "entries": [
-        { "startedAt": 1710849540000, "duration(ms)": 8200, "operationDetails": "PutOperation{...}" }
-      ]
-    }
+    "slowInvocations": [
+      { "startedAt": 1710849540000, "duration(ms)": 8200, "operationDetails": "PutOperation{...}" }
+    ]
   }
 }}
 ```
@@ -738,14 +734,17 @@ interface StoreLatencyContent {
 interface DataStructureEntry {
   [methodName: string]: MethodEntry;
 }
+interface LatencyBucket {
+  lower_us: number;
+  upper_us: number;
+  count:    number;
+}
 interface MethodEntry {
-  count:              number;
-  "totalTime(us)":    number;
-  "avg(us)":          number;
-  "max(us)":          number;
-  "latency-distribution": {
-    [bucketLabel: string]: number;   // e.g. "4..7us", "64..127us"; only non-zero buckets
-  };
+  count:                  number;
+  "totalTime(us)":        number;
+  "avg(us)":              number;
+  "max(us)":              number;
+  latency_distribution:   LatencyBucket[];   // only non-zero buckets
 }
 ```
 
@@ -757,25 +756,28 @@ interface MethodEntry {
       "totalTime(us)": 4200,
       "avg(us)": 42,
       "max(us)": 310,
-      "latency-distribution": {
-        "32..63us": 60,
-        "64..127us": 35,
-        "256..511us": 5
-      }
+      "latency_distribution": [
+        { "lower_us": 32,  "upper_us": 63,  "count": 60 },
+        { "lower_us": 64,  "upper_us": 127, "count": 35 },
+        { "lower_us": 256, "upper_us": 511, "count": 5  }
+      ]
     },
     "store": {
       "count": 50,
       "totalTime(us)": 8100,
       "avg(us)": 162,
       "max(us)": 450,
-      "latency-distribution": { "128..255us": 40, "256..511us": 10 }
+      "latency_distribution": [
+        { "lower_us": 128, "upper_us": 255, "count": 40 },
+        { "lower_us": 256, "upper_us": 511, "count": 10 }
+      ]
     }
   }
 }}
 ```
 
-Bucket labels come from `LatencyDistribution.LATENCY_KEYS`. Only buckets with
-`value > 0` are emitted.
+Only buckets with `value > 0` are emitted. Bounds come from
+`LatencyDistribution.bucketMinUs(bucket)` and `bucketMaxUs(bucket)`.
 
 ---
 
@@ -788,13 +790,11 @@ interface OperationsProfilerContent {
   [operationClassName: string]: LatencyEntry;   // only classes with count > 0
 }
 interface LatencyEntry {
-  count:            number;
-  "totalTime(us)":  number;
-  "avg(us)":        number;
-  "max(us)":        number;
-  "latency-distribution": {
-    [bucketLabel: string]: number;
-  };
+  count:                number;
+  "totalTime(us)":      number;
+  "avg(us)":            number;
+  "max(us)":            number;
+  latency_distribution: LatencyBucket[];   // see StoreLatencyPlugin for LatencyBucket definition
 }
 ```
 
@@ -805,7 +805,11 @@ interface LatencyEntry {
     "totalTime(us)": 12500,
     "avg(us)": 25,
     "max(us)": 310,
-    "latency-distribution": { "16..31us": 420, "32..63us": 75, "256..511us": 5 }
+    "latency_distribution": [
+      { "lower_us": 16,  "upper_us": 31,  "count": 420 },
+      { "lower_us": 32,  "upper_us": 63,  "count": 75  },
+      { "lower_us": 256, "upper_us": 511, "count": 5   }
+    ]
   }
 }}
 ```
@@ -976,7 +980,7 @@ The following call sites use format-aware branching to emit structured JSON:
 | `OperationHeartbeatPlugin` | `run` | JSON uses `"members":[{"address":...}]` array; STANDARD uses `"member<addr>"` section key and also appends `lastHeartbeat(date-time)` / `now(date-time)` |
 | `MemberHeartbeatPlugin` | `render` | Same as `OperationHeartbeatPlugin` above |
 | `SlowOperationPlugin.renderStackTrace` | stack trace lines | `"line"` |
-| `SlowOperationPlugin.renderInvocations` | per invocation | `"startedAt"`, `"duration(ms)"`, `"operationDetails"` (STANDARD also writes `started(date-time)`) |
+| `SlowOperationPlugin.renderInvocations` | per invocation (array item) | `"startedAt"`, `"duration(ms)"`, `"operationDetails"` (STANDARD also writes `started(date-time)`) |
 | `SystemLogPlugin.render(LifecycleEvent)` | lifecycle state | `"state"` |
 | `SystemLogPlugin.render(Version)` | cluster version | `"version"` |
 | `SystemLogPlugin.render(MembershipEvent)` | member list entries | `"address"`, `"isThis"`, `"isMaster"` |
@@ -1585,7 +1589,7 @@ jq 'select(.name == "SlowOperations") |
     {epoch: $e,
      operation: .key,
      invocations: .value.invocations,
-     worst_duration_ms: (.value.slowInvocations.entries // [] | map(.["duration(ms)"]) | max)}' diag.log
+     worst_duration_ms: (.value.slowInvocations // [] | map(.["duration(ms)"]) | max)}' diag.log
 
 # Stack trace for a specific operation (first occurrence)
 jq 'select(.name == "SlowOperations") |
@@ -1597,7 +1601,7 @@ jq 'select(.name == "SlowOperations") |
 jq 'select(.name == "SlowOperations") |
     .content | to_entries[] |
     .key as $op |
-    .value.slowInvocations.entries // [] |
+    .value.slowInvocations // [] |
     .[] |
     {operation: $op, startedAt, duration_ms: .["duration(ms)"], details: .operationDetails}' \
   diag.log \

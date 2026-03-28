@@ -107,14 +107,14 @@ public final class LatencyDistribution {
     /**
      * The maximum value that can be placed in a bucket.
      */
-    static int bucketMaxUs(int bucket) {
+    public static int bucketMaxUs(int bucket) {
         return bucketMinUs(bucket + 1) - 1;
     }
 
     /**
      * The minimum value that can be placed in a bucket.
      */
-    static int bucketMinUs(int bucket) {
+    public static int bucketMinUs(int bucket) {
         return bucket == 0 ? 0 : 1 << bucket;
     }
 

@@ -93,10 +93,12 @@ public class InvocationPluginTest extends AbstractDiagnosticsPluginTest {
         plugin.run(jsonWriter);
 
         String json = jsonOut.toString();
-        assertTrue("operation key expected in JSON History section",
-                json.contains("\"operation\":\"com.hazelcast.map.impl.operation.GetOperation\""));
-        assertTrue("samples key expected in JSON History section",
-                json.contains("\"samples\":3") || json.contains("\"samples\":5"));
+        assertTrue("class name as key expected in JSON History section",
+                json.contains("\"com.hazelcast.map.impl.operation.GetOperation\":3")
+                        || json.contains("\"com.hazelcast.map.impl.operation.GetOperation\": 3"));
+        assertTrue("count value expected in JSON History section",
+                json.contains("\"com.hazelcast.map.impl.operation.PutOperation\":5")
+                        || json.contains("\"com.hazelcast.map.impl.operation.PutOperation\": 5"));
     }
 
     static class SlowEntryProcessor implements EntryProcessor {

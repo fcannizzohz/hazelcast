@@ -162,6 +162,18 @@ public abstract class BaseInvocation {
         }
     }
 
+    public String getPendingResponseDesc() {
+        return "{" + pendingResponse + "}";
+    }
+
+    public int getBackupsAcksExpected() {
+        return backupsAcksExpected;
+    }
+
+    public int getBackupsAcksReceived() {
+        return backupsAcksReceived;
+    }
+
     protected abstract boolean shouldCompleteWithoutBackups();
 
     protected abstract void complete(Object value);

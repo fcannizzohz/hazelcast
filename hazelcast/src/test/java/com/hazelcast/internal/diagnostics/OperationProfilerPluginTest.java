@@ -94,7 +94,9 @@ public class OperationProfilerPluginTest extends AbstractDiagnosticsPluginTest {
         assertTrue("Expected OperationsProfiler section", output.contains("\"OperationsProfiler\""));
         assertTrue("Expected operation class name as section", output.contains("\"java.lang.String\""));
         assertTrue("Expected count key", output.contains("\"count\":1"));
-        assertTrue("Expected latency-distribution section", output.contains("\"latency-distribution\""));
+        assertTrue("Expected latency_distribution array", output.contains("\"latency_distribution\""));
+        assertTrue("Expected lower_us field", output.contains("\"lower_us\""));
+        assertTrue("Expected upper_us field", output.contains("\"upper_us\""));
     }
 
     @Test

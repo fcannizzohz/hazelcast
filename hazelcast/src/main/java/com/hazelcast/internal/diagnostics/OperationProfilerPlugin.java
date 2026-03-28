@@ -106,21 +106,39 @@ public class OperationProfilerPlugin extends DiagnosticsPlugin {
 
     /**
      * Writes the common latency statistics (count, totalTime, avg, max) and
-     * the {@code latency-distribution} sub-section for the given distribution.
+     * the latency-distribution for the given distribution.
      * The caller is responsible for opening and closing the enclosing section.
+     * <p>
+     * In JSON format the distribution is emitted as a {@code "latency_distribution"} array
+     * of objects with {@code lower_us}, {@code upper_us}, and {@code count} fields.
+     * In standard format it is emitted as a {@code latency-distribution} section with
+     * bucket-label keys.
      */
     static void writeLatencyStats(DiagnosticsLogWriter writer, LatencyDistribution distribution) {
         writer.writeKeyValueEntry("count", distribution.count());
         writer.writeKeyValueEntry("totalTime(us)", distribution.totalMicros());
         writer.writeKeyValueEntry("avg(us)", distribution.avgMicros());
         writer.writeKeyValueEntry("max(us)", distribution.maxMicros());
-        writer.startSection("latency-distribution");
-        for (int bucket = 0; bucket < distribution.bucketCount(); bucket++) {
-            long value = distribution.bucket(bucket);
-            if (value > 0) {
-                writer.writeKeyValueEntry(LatencyDistribution.LATENCY_KEYS[bucket], value);
+        if (writer.getFormat() == DiagnosticsLogFormat.JSON) {
+            for (int bucket = 0; bucket < distribution.bucketCount(); bucket++) {
+                long value = distribution.bucket(bucket);
+                if (value > 0) {
+                    writer.startArrayItemSection("latency_distribution");
+                    writer.writeKeyValueEntry("lower_us", LatencyDistribution.bucketMinUs(bucket));
+                    writer.writeKeyValueEntry("upper_us", LatencyDistribution.bucketMaxUs(bucket));
+                    writer.writeKeyValueEntry("count", value);
+                    writer.endArrayItemSection();
+                }
             }
+        } else {
+            writer.startSection("latency-distribution");
+            for (int bucket = 0; bucket < distribution.bucketCount(); bucket++) {
+                long value = distribution.bucket(bucket);
+                if (value > 0) {
+                    writer.writeKeyValueEntry(LatencyDistribution.LATENCY_KEYS[bucket], value);
+                }
+            }
+            writer.endSection();
         }
-        writer.endSection();
     }
 }

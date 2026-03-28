@@ -144,7 +144,7 @@ public class StoreLatencyPluginTest extends AbstractDiagnosticsPluginTest {
         assertTrue("Expected data structure name section", output.contains("\"employees\""));
         assertTrue("Expected method name section", output.contains("\"load\""));
         assertTrue("Expected count key", output.contains("\"count\":2"));
-        assertTrue("Expected latency-distribution section", output.contains("\"latency-distribution\""));
+        assertTrue("Expected latency_distribution array", output.contains("\"latency_distribution\""));
     }
 
     @Test
