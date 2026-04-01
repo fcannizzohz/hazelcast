@@ -688,6 +688,13 @@
             <version>1.2.1</version>
             <scope>test</scope>
         </dependency>
+        <!-- JSON Schema draft 2020-12 validator; used only by diagnostics JSON tests -->
+        <dependency>
+            <groupId>com.networknt</groupId>
+            <artifactId>json-schema-validator</artifactId>
+            <version>1.5.4</version>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>jakarta.jms</groupId>
             <artifactId>jakarta.jms-api</artifactId>

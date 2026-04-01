@@ -68,6 +68,13 @@ public class DiagnosticsConfig implements IdentifiedDataSerializable {
      */
     public static final int DEFAULT_AUTO_OFF_DURATION_IN_MINUTES = -1;
 
+    /**
+     * Default output format ({@link DiagnosticsLogFormat#STANDARD}).
+     *
+     * @since 6.0
+     */
+    public static final DiagnosticsLogFormat DEFAULT_LOG_FORMAT = DiagnosticsLogFormat.STANDARD;
+
     private boolean enabled;
     private float maxRolledFileSizeInMB = DEFAULT_MAX_ROLLED_FILE_SIZE;
     private int maxRolledFileCount = DEFAULT_MAX_ROLLED_FILE_COUNT;
@@ -75,6 +82,7 @@ public class DiagnosticsConfig implements IdentifiedDataSerializable {
     private String logDirectory = DEFAULT_DIRECTORY;
     private String fileNamePrefix;
     private DiagnosticsOutputType outputType = DEFAULT_OUTPUT_TYPE;
+    private DiagnosticsLogFormat logFormat = DEFAULT_LOG_FORMAT;
     private Map<String, String> pluginProperties = new HashMap<>();
     private int autoOffDurationInMinutes = DEFAULT_AUTO_OFF_DURATION_IN_MINUTES;
 
@@ -93,6 +101,7 @@ public class DiagnosticsConfig implements IdentifiedDataSerializable {
         this.logDirectory = diagnosticsConfig.getLogDirectory();
         this.fileNamePrefix = diagnosticsConfig.getFileNamePrefix();
         this.outputType = diagnosticsConfig.getOutputType();
+        this.logFormat = diagnosticsConfig.getLogFormat();
         this.pluginProperties = diagnosticsConfig.pluginProperties;
         this.autoOffDurationInMinutes = diagnosticsConfig.getAutoOffDurationInMinutes();
     }
@@ -312,6 +321,31 @@ public class DiagnosticsConfig implements IdentifiedDataSerializable {
     }
 
     /**
+     * Returns the output format for diagnostics logs.
+     * Defaults to {@link DiagnosticsLogFormat#STANDARD}.
+     *
+     * @since 6.0
+     */
+    public DiagnosticsLogFormat getLogFormat() {
+        return logFormat;
+    }
+
+    /**
+     * Sets the output format for diagnostics logs.
+     * <p>Use {@link DiagnosticsLogFormat#JSON} to emit newline-delimited JSON
+     * (NDJSON) suitable for ingestion by Loki, Elasticsearch, and similar tools.
+     * <p>Can also be set via the system property
+     * {@code hazelcast.diagnostics.log.format=JSON}.
+     *
+     * @param logFormat the desired format; must not be null
+     * @since 6.0
+     */
+    public DiagnosticsConfig setLogFormat(@Nonnull DiagnosticsLogFormat logFormat) {
+        this.logFormat = checkNotNull(logFormat, "logFormat must not be null");
+        return this;
+    }
+
+    /**
      * Gets properties of the Diagnostic Configuration. The properties are used by
      * diagnostic plugins.
      * <p>Note that the keys and values are not verified. Make sure that the keys and values
@@ -359,6 +393,7 @@ public class DiagnosticsConfig implements IdentifiedDataSerializable {
         out.writeString(outputType.name());
         SerializationUtil.writeMapStringKey(pluginProperties, out);
         out.writeInt(autoOffDurationInMinutes);
+        out.writeString(logFormat.name());
     }
 
     @Override
@@ -372,6 +407,7 @@ public class DiagnosticsConfig implements IdentifiedDataSerializable {
         outputType = DiagnosticsOutputType.valueOf(in.readString());
         pluginProperties = SerializationUtil.readMapStringKey(in);
         autoOffDurationInMinutes = in.readInt();
+        logFormat = DiagnosticsLogFormat.valueOf(in.readString());
     }
 
     @Override
@@ -389,6 +425,7 @@ public class DiagnosticsConfig implements IdentifiedDataSerializable {
                 && Objects.equals(logDirectory, that.logDirectory)
                 && Objects.equals(fileNamePrefix, that.fileNamePrefix)
                 && Objects.equals(outputType, that.outputType)
+                && Objects.equals(logFormat, that.logFormat)
                 && Objects.equals(pluginProperties, that.pluginProperties)
                 && autoOffDurationInMinutes == that.autoOffDurationInMinutes;
     }
@@ -396,7 +433,8 @@ public class DiagnosticsConfig implements IdentifiedDataSerializable {
     @Override
     public int hashCode() {
         return Objects.hash(enabled, maxRolledFileSizeInMB, maxRolledFileCount,
-                includeEpochTime, logDirectory, fileNamePrefix, outputType, pluginProperties, autoOffDurationInMinutes);
+                includeEpochTime, logDirectory, fileNamePrefix, outputType, logFormat, pluginProperties,
+                autoOffDurationInMinutes);
     }
 
     @Override
@@ -420,6 +458,7 @@ public class DiagnosticsConfig implements IdentifiedDataSerializable {
                 + ", logDirectory='" + logDirectory + '\''
                 + ", fileNamePrefix='" + fileNamePrefix + '\''
                 + ", outputType=" + outputType
+                + ", logFormat=" + logFormat
                 + ", autoOffDurationInMinutes=" + autoOffDurationInMinutes
                 + ", properties='" + properties
                 + "'}";
