@@ -56,6 +56,7 @@ import com.hazelcast.internal.cluster.impl.VersionMismatchException;
 import com.hazelcast.internal.diagnostics.BuildInfoPlugin;
 import com.hazelcast.internal.diagnostics.ConfigPropertiesPlugin;
 import com.hazelcast.internal.diagnostics.Diagnostics;
+import com.hazelcast.internal.diagnostics.DiagnosticsLogFormat;
 import com.hazelcast.internal.diagnostics.EventQueuePlugin;
 import com.hazelcast.internal.diagnostics.HealthMonitor;
 import com.hazelcast.internal.diagnostics.InvocationProfilerPlugin;
@@ -73,6 +74,25 @@ import com.hazelcast.internal.diagnostics.SlowOperationPlugin;
 import com.hazelcast.internal.diagnostics.StoreLatencyPlugin;
 import com.hazelcast.internal.diagnostics.SystemLogPlugin;
 import com.hazelcast.internal.diagnostics.SystemPropertiesPlugin;
+import com.hazelcast.internal.diagnostics.json.JsonBuildInfoPlugin;
+import com.hazelcast.internal.diagnostics.json.JsonConfigPropertiesPlugin;
+import com.hazelcast.internal.diagnostics.json.JsonEventQueuePlugin;
+import com.hazelcast.internal.diagnostics.json.JsonInvocationProfilerPlugin;
+import com.hazelcast.internal.diagnostics.json.JsonInvocationSamplePlugin;
+import com.hazelcast.internal.diagnostics.json.JsonMemberHazelcastInstanceInfoPlugin;
+import com.hazelcast.internal.diagnostics.json.JsonMemberHeartbeatPlugin;
+import com.hazelcast.internal.diagnostics.json.JsonMetricsPlugin;
+import com.hazelcast.internal.diagnostics.json.JsonNetworkingImbalancePlugin;
+import com.hazelcast.internal.diagnostics.json.JsonOperationHeartbeatPlugin;
+import com.hazelcast.internal.diagnostics.json.JsonOperationProfilerPlugin;
+import com.hazelcast.internal.diagnostics.json.JsonOperationThreadSamplerPlugin;
+import com.hazelcast.internal.diagnostics.json.JsonOverloadedConnectionsPlugin;
+import com.hazelcast.internal.diagnostics.json.JsonPendingInvocationsPlugin;
+import com.hazelcast.internal.diagnostics.json.JsonSlowOperationPlugin;
+import com.hazelcast.internal.diagnostics.json.JsonStoreLatencyPlugin;
+import com.hazelcast.internal.diagnostics.json.JsonSystemLogPlugin;
+import com.hazelcast.internal.diagnostics.json.JsonSystemPropertiesPlugin;
+import com.hazelcast.spi.impl.operationservice.impl.OperationServiceImpl;
 import com.hazelcast.internal.dynamicconfig.ClusterWideConfigurationService;
 import com.hazelcast.internal.dynamicconfig.EmptyDynamicConfigListener;
 import com.hazelcast.internal.hotrestart.InternalHotRestartService;
@@ -633,6 +653,11 @@ public class DefaultNodeExtension implements NodeExtension {
         final NodeEngineImpl nodeEngine = node.nodeEngine;
         HazelcastProperties properties = nodeEngine.getProperties();
 
+        if (diagnostics.getLogFormat() == DiagnosticsLogFormat.JSON) {
+            registerJsonPlugins(diagnostics, nodeEngine, properties);
+            return;
+        }
+
         // static loggers at beginning of file
         diagnostics.register(new BuildInfoPlugin(nodeEngine.getLogger(BuildInfoPlugin.class)));
         diagnostics.register(new SystemPropertiesPlugin(nodeEngine.getLogger(SystemPropertiesPlugin.class)));
@@ -665,6 +690,66 @@ public class DefaultNodeExtension implements NodeExtension {
         diagnostics.register(new OperationHeartbeatPlugin(nodeEngine.getLogger(OperationHeartbeatPlugin.class),
                 nodeEngine.getOperationService().getInvocationMonitor(), properties));
         diagnostics.register(new OperationThreadSamplerPlugin(nodeEngine));
+    }
+
+    private void registerJsonPlugins(Diagnostics diagnostics, NodeEngineImpl nodeEngine, HazelcastProperties properties) {
+        // run-once plugins (logged once at startup)
+        diagnostics.registerJsonPlugin(new JsonBuildInfoPlugin(
+                nodeEngine.getLogger(JsonBuildInfoPlugin.class), properties));
+        diagnostics.registerJsonPlugin(new JsonSystemPropertiesPlugin(
+                nodeEngine.getLogger(JsonSystemPropertiesPlugin.class), properties));
+        diagnostics.registerJsonPlugin(new JsonConfigPropertiesPlugin(
+                nodeEngine.getLogger(JsonConfigPropertiesPlugin.class), properties,
+                Collections.emptyMap()));
+
+        // periodic plugins
+        diagnostics.registerJsonPlugin(new JsonMetricsPlugin(
+                nodeEngine.getLogger(JsonMetricsPlugin.class), properties,
+                nodeEngine.getMetricsRegistry()));
+        diagnostics.registerJsonPlugin(new JsonSystemLogPlugin(
+                nodeEngine.getLogger(JsonSystemLogPlugin.class), properties,
+                node.getServer(), nodeEngine.getHazelcastInstance(), node.getNodeExtension()));
+        diagnostics.registerJsonPlugin(new JsonPendingInvocationsPlugin(
+                nodeEngine.getLogger(JsonPendingInvocationsPlugin.class), properties,
+                nodeEngine.getOperationService().getInvocationRegistry()));
+        diagnostics.registerJsonPlugin(new JsonOperationHeartbeatPlugin(
+                nodeEngine.getLogger(JsonOperationHeartbeatPlugin.class), properties,
+                nodeEngine.getOperationService().getInvocationMonitor()));
+        diagnostics.registerJsonPlugin(new JsonMemberHeartbeatPlugin(
+                nodeEngine.getLogger(JsonMemberHeartbeatPlugin.class), properties,
+                nodeEngine.getClusterService()));
+        diagnostics.registerJsonPlugin(new JsonEventQueuePlugin(
+                nodeEngine.getLogger(JsonEventQueuePlugin.class), properties,
+                ((EventServiceImpl) nodeEngine.getEventService()).getEventExecutor()));
+        diagnostics.registerJsonPlugin(new JsonSlowOperationPlugin(
+                nodeEngine.getLogger(JsonSlowOperationPlugin.class), properties,
+                (OperationServiceImpl) nodeEngine.getOperationService()));
+        diagnostics.registerJsonPlugin(new JsonNetworkingImbalancePlugin(
+                nodeEngine.getLogger(JsonNetworkingImbalancePlugin.class), properties,
+                node.getServer()));
+        diagnostics.registerJsonPlugin(new JsonOverloadedConnectionsPlugin(
+                nodeEngine.getLogger(JsonOverloadedConnectionsPlugin.class), properties,
+                nodeEngine));
+        diagnostics.registerJsonPlugin(new JsonOperationProfilerPlugin(
+                nodeEngine.getLogger(JsonOperationProfilerPlugin.class), properties,
+                nodeEngine.getOperationService().getOpLatencyDistributions()));
+        diagnostics.registerJsonPlugin(new JsonInvocationProfilerPlugin(
+                nodeEngine.getLogger(JsonInvocationProfilerPlugin.class), properties,
+                nodeEngine.getOperationService().getInvocationRegistry()));
+        diagnostics.registerJsonPlugin(new JsonInvocationSamplePlugin(
+                nodeEngine.getLogger(JsonInvocationSamplePlugin.class), properties,
+                nodeEngine.getOperationService().getInvocationRegistry()));
+        diagnostics.registerJsonPlugin(new JsonOperationThreadSamplerPlugin(nodeEngine));
+        diagnostics.registerJsonPlugin(new JsonMemberHazelcastInstanceInfoPlugin(nodeEngine));
+
+        // StoreLatencyPlugin: registered via Diagnostics.register() so that store wrappers can
+        // look it up via Diagnostics.getPlugin(StoreLatencyPlugin.class). Its run() is a no-op;
+        // JSON output is handled by JsonDiagnosticsLog via runJson().
+        diagnostics.register(new JsonStoreLatencyPlugin(
+                nodeEngine.getLogger(JsonStoreLatencyPlugin.class), properties));
+
+        // Start the JSON scheduler now that all plugins are registered
+        diagnostics.startJsonLog();
     }
 
     @Override

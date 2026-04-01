@@ -30,6 +30,7 @@ import com.hazelcast.spi.impl.operationservice.Operation;
 import com.hazelcast.spi.properties.HazelcastProperties;
 import com.hazelcast.spi.properties.HazelcastProperty;
 
+import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedList;
@@ -136,8 +137,8 @@ public class JsonOverloadedConnectionsPlugin extends JsonDiagnosticsPlugin {
             }
         }
 
-        String from = String.valueOf(connection.getChannel().localSocketAddress());
-        String to = String.valueOf(connection.getChannel().remoteSocketAddress());
+        String from = formatSocketAddress((InetSocketAddress) connection.getChannel().localSocketAddress());
+        String to = formatSocketAddress((InetSocketAddress) connection.getChannel().remoteSocketAddress());
         results.add(new ConnectionSample(from, to, priority, snapshot.size(), actualSampleCount, occurrences));
     }
 
@@ -196,6 +197,13 @@ public class JsonOverloadedConnectionsPlugin extends JsonDiagnosticsPlugin {
             }
         }
         return packet.getClass().getName();
+    }
+
+    private static String formatSocketAddress(InetSocketAddress addr) {
+        if (addr == null) {
+            return "null";
+        }
+        return addr.getAddress().getHostAddress() + ":" + addr.getPort();
     }
 
     private static final class ConnectionSample {

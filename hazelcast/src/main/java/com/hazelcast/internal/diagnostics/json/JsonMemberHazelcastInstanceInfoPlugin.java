@@ -63,7 +63,7 @@ public class JsonMemberHazelcastInstanceInfoPlugin extends JsonDiagnosticsPlugin
         long epoch = System.currentTimeMillis();
         writer.startEntry(epoch, "HazelcastInstance");
 
-        writer.writeString("thisAddress", nodeEngine.getNode().getThisAddress().toString());
+        writer.writeString("thisAddress", formatAddress(nodeEngine.getNode().getThisAddress()));
         writer.writeBoolean("isRunning", nodeEngine.getNode().isRunning());
         writer.writeBoolean("isLite", nodeEngine.getNode().isLiteMember());
         writer.writeBoolean("joined", nodeEngine.getNode().getClusterService().isJoined());
@@ -77,7 +77,7 @@ public class JsonMemberHazelcastInstanceInfoPlugin extends JsonDiagnosticsPlugin
         writer.writeBoolean("isMaster", nodeEngine.getClusterService().isMaster());
 
         Address masterAddress = nodeEngine.getClusterService().getMasterAddress();
-        writer.writeString("masterAddress", masterAddress == null ? "null" : masterAddress.toString());
+        writer.writeString("masterAddress", masterAddress == null ? "null" : formatAddress(masterAddress));
 
         Collection<MemberImpl> members = nodeEngine.getClusterService().getMemberImpls();
         writer.startObject("Members");
@@ -85,7 +85,7 @@ public class JsonMemberHazelcastInstanceInfoPlugin extends JsonDiagnosticsPlugin
             writer.startArray("entries");
             for (MemberImpl member : members) {
                 writer.startArrayItem();
-                writer.writeString("address", member.getAddress().toString());
+                writer.writeString("address", formatAddress(member.getAddress()));
                 writer.endArrayItem();
             }
             writer.endArray();

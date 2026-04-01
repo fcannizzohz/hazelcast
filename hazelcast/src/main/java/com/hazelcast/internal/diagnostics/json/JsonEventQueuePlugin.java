@@ -37,7 +37,6 @@ import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 
 import static java.lang.Math.min;
-import static java.lang.String.format;
 import static java.util.concurrent.TimeUnit.SECONDS;
 
 /**
@@ -126,7 +125,7 @@ public class JsonEventQueuePlugin extends JsonDiagnosticsPlugin {
             }
             double percentage = (double) count / actualSampleCount;
             writer.startArrayItem();
-            writer.writeString("eventType", key);
+            writeEventKey(writer, key);
             writer.writeLong("sampleCount", count);
             writer.writeDouble("percentage", percentage);
             writer.endArrayItem();
@@ -134,6 +133,19 @@ public class JsonEventQueuePlugin extends JsonDiagnosticsPlugin {
         writer.endArray();
         writer.endObject();
         writer.endObject();
+    }
+
+    private static void writeEventKey(JsonEntryWriter writer, String key) {
+        // Structured events use the format "serviceType\0dataStructureName\0eventType";
+        // fallback entries (unknown runnable/event class names) are plain strings.
+        String[] parts = key.split("\0", -1);
+        if (parts.length == 3) {
+            writer.writeString("serviceType", parts[0]);
+            writer.writeString("dataStructureName", parts[1]);
+            writer.writeString("eventType", parts[2]);
+        } else {
+            writer.writeString("eventType", key);
+        }
     }
 
     private int sampleRunnable(Runnable runnable) {
@@ -148,16 +160,16 @@ public class JsonEventQueuePlugin extends JsonDiagnosticsPlugin {
         Object event = dispatcher.getEvent();
         if (event instanceof EntryEventData entryEventData) {
             EntryEventType type = EntryEventType.getByType(entryEventData.getEventType());
-            occurrenceMap.add(format("IMap '%s' %s", entryEventData.getMapName(), type), 1);
+            occurrenceMap.add("IMap\0" + entryEventData.getMapName() + "\0" + type, 1);
             return 1;
         } else if (event instanceof CacheEventSet cacheEventSet) {
             Set<CacheEventData> cacheEvents = cacheEventSet.getEvents();
             for (CacheEventData ced : cacheEvents) {
-                occurrenceMap.add(format("ICache '%s' %s", ced.getName(), ced.getCacheEventType()), 1);
+                occurrenceMap.add("ICache\0" + ced.getName() + "\0" + ced.getCacheEventType(), 1);
             }
             return cacheEvents.size();
         } else if (event instanceof QueueEvent queueEvent) {
-            occurrenceMap.add(format("IQueue '%s' %s", queueEvent.getName(), queueEvent.getEventType()), 1);
+            occurrenceMap.add("IQueue\0" + queueEvent.getName() + "\0" + queueEvent.getEventType(), 1);
             return 1;
         } else if (event instanceof CollectionEvent collectionEvent) {
             String serviceName = dispatcher.getServiceName();
@@ -166,8 +178,7 @@ public class JsonEventQueuePlugin extends JsonDiagnosticsPlugin {
             } else if (ListService.SERVICE_NAME.equals(serviceName)) {
                 serviceName = "IList";
             }
-            occurrenceMap.add(format("%s '%s' %s", serviceName, collectionEvent.getName(),
-                    collectionEvent.getEventType()), 1);
+            occurrenceMap.add(serviceName + "\0" + collectionEvent.getName() + "\0" + collectionEvent.getEventType(), 1);
             return 1;
         }
         occurrenceMap.add(event.getClass().getSimpleName(), 1);

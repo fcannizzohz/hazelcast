@@ -113,7 +113,7 @@ public class JsonInvocationSamplePlugin extends JsonDiagnosticsPlugin {
                     hasEntries = true;
                 }
                 writer.startArrayItem();
-                writer.writeString("description", invocation.toString());
+                writer.writeString("operation", operationDesc);
                 writer.writeLong("duration", durationMs);
                 writer.writeString("unit", "ms");
                 writer.endArrayItem();
