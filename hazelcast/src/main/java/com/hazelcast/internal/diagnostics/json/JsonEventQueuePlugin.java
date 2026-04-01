@@ -109,6 +109,9 @@ public class JsonEventQueuePlugin extends JsonDiagnosticsPlugin {
         while (actualSampleCount < sampleCount) {
             actualSampleCount += sampleRunnable(events.get(random.nextInt(eventCount)));
         }
+        if (actualSampleCount == 0) {
+            return;
+        }
 
         String workerKey = "worker=" + index;
         writer.startObject(workerKey);

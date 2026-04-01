@@ -56,7 +56,8 @@ public class JsonEventQueuePluginTest extends HazelcastTestSupport {
     public void setUp() throws Exception {
         Config config = new Config()
                 .setProperty("hazelcast.diagnostics.event.queue.period.seconds", "1")
-                .setProperty("hazelcast.diagnostics.event.queue.threshold", "0");  // trigger on any size
+                // Use default threshold (1000); tests only verify envelope, not worker contents
+                .setProperty("hazelcast.diagnostics.event.queue.threshold", "1000");
         hz = createHazelcastInstance(config);
         NodeEngineImpl nodeEngine = getNodeEngineImpl(hz);
 
