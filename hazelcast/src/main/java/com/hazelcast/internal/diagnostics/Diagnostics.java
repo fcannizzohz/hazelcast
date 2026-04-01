@@ -317,7 +317,18 @@ public class Diagnostics {
         // if service is disabled, plugins are not started and not active.
         // so outsiders should not be able to get the plugin instance.
         if (isEnabled()) {
-            return (P) pluginsMap.get(pluginClass);
+            DiagnosticsPlugin plugin = pluginsMap.get(pluginClass);
+            if (plugin != null) {
+                return (P) plugin;
+            }
+            // In JSON mode a subclass (e.g. JsonStoreLatencyPlugin) may be registered
+            // under its own class key rather than the base class key. Fall back to
+            // a subtype scan so callers using the base class still find the right instance.
+            for (DiagnosticsPlugin candidate : pluginsMap.values()) {
+                if (pluginClass.isInstance(candidate)) {
+                    return (P) candidate;
+                }
+            }
         }
         return null;
     }
