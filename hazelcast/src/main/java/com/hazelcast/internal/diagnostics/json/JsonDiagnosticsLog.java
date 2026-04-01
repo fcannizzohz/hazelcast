@@ -20,6 +20,7 @@ import com.hazelcast.internal.diagnostics.Diagnostics;
 import com.hazelcast.internal.diagnostics.DiagnosticsLog;
 import com.hazelcast.internal.diagnostics.DiagnosticsOutputType;
 import com.hazelcast.internal.diagnostics.DiagnosticsPlugin;
+import com.hazelcast.internal.diagnostics.StoreLatencyPlugin;
 import com.hazelcast.logging.ILogger;
 
 import java.io.BufferedWriter;
@@ -139,6 +140,18 @@ public class JsonDiagnosticsLog implements DiagnosticsLog {
             } else {
                 futures.add(scheduler.scheduleAtFixedRate(
                         new RunPluginTask(plugin), 0, period, MILLISECONDS));
+            }
+        }
+
+        // JsonStoreLatencyPlugin is registered in the standard Diagnostics system (not in the JSON plugin
+        // list) because store wrappers look it up via Diagnostics.getPlugin(StoreLatencyPlugin.class).
+        // Schedule its JSON output here so it runs on the JSON scheduler thread.
+        StoreLatencyPlugin storePlugin = diagnostics.getPlugin(StoreLatencyPlugin.class);
+        if (storePlugin instanceof JsonStoreLatencyPlugin jsonStorePlugin) {
+            long period = jsonStorePlugin.getPeriodMillis();
+            if (period > JsonDiagnosticsPlugin.DISABLED_PERIOD_MS) {
+                futures.add(scheduler.scheduleAtFixedRate(
+                        new RunJsonStoreLatencyTask(jsonStorePlugin), 0, period, MILLISECONDS));
             }
         }
     }
@@ -288,6 +301,27 @@ public class JsonDiagnosticsLog implements DiagnosticsLog {
                 }
             } catch (Throwable t) {
                 logger.warning("JsonDiagnosticsPlugin run() failed: " + plugin.getClass(), t);
+            }
+        }
+    }
+
+    private final class RunJsonStoreLatencyTask implements Runnable {
+        private final JsonStoreLatencyPlugin plugin;
+
+        RunJsonStoreLatencyTask(JsonStoreLatencyPlugin plugin) {
+            this.plugin = plugin;
+        }
+
+        @Override
+        public void run() {
+            try {
+                maybeRoll();
+                plugin.runJson(entryWriter);
+                if (printWriter != null) {
+                    printWriter.flush();
+                }
+            } catch (Throwable t) {
+                logger.warning("JsonStoreLatencyPlugin runJson() failed", t);
             }
         }
     }
