@@ -44,7 +44,7 @@ public final class DiagnosticsSchemaValidator {
     private static final String SCHEMA_RESOURCE = "/diaglogs.schema.json";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private static volatile DiagnosticsSchemaValidator INSTANCE;
+    private static volatile DiagnosticsSchemaValidator instance;
 
     private final JsonSchema schema;
 
@@ -65,14 +65,14 @@ public final class DiagnosticsSchemaValidator {
      * Returns the singleton validator, loading the schema on first call.
      */
     public static DiagnosticsSchemaValidator get() {
-        if (INSTANCE == null) {
+        if (instance == null) {
             synchronized (DiagnosticsSchemaValidator.class) {
-                if (INSTANCE == null) {
-                    INSTANCE = new DiagnosticsSchemaValidator();
+                if (instance == null) {
+                    instance = new DiagnosticsSchemaValidator();
                 }
             }
         }
-        return INSTANCE;
+        return instance;
     }
 
     /**

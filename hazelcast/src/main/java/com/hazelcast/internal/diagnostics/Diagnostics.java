@@ -282,6 +282,14 @@ public class Diagnostics {
         return maxRollingFileCount;
     }
 
+    public ILogger getLogger() {
+        return logger;
+    }
+
+    public DiagnosticsOutputType getOutputType() {
+        return outputType;
+    }
+
     public DiagnosticsMetricCollector getMetricCollector() {
         return metricCollector;
     }

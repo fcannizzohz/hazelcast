@@ -67,6 +67,9 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
 public class JsonDiagnosticsLog implements DiagnosticsLog {
 
     private static final String FILE_EXT = ".jsonl";
+    private static final int SCHEDULER_SHUTDOWN_TIMEOUT_SECONDS = 5;
+    @SuppressWarnings("checkstyle:magicnumber")
+    private static final long BYTES_PER_MB = 1024L * 1024L;
 
     private final Diagnostics diagnostics;
     private final ILogger logger;
@@ -86,9 +89,9 @@ public class JsonDiagnosticsLog implements DiagnosticsLog {
 
     public JsonDiagnosticsLog(Diagnostics diagnostics) {
         this.diagnostics = diagnostics;
-        this.logger = diagnostics.logger;
-        this.outputType = diagnostics.outputType != null
-                ? diagnostics.outputType
+        this.logger = diagnostics.getLogger();
+        this.outputType = diagnostics.getOutputType() != null
+                ? diagnostics.getOutputType()
                 : DiagnosticsOutputType.FILE;
 
         // Initialise writer with a no-op sink; replaced in start()
@@ -168,7 +171,7 @@ public class JsonDiagnosticsLog implements DiagnosticsLog {
         if (scheduler != null) {
             scheduler.shutdown();
             try {
-                if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                if (!scheduler.awaitTermination(SCHEDULER_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
                     scheduler.shutdownNow();
                 }
             } catch (InterruptedException e) {
@@ -199,11 +202,12 @@ public class JsonDiagnosticsLog implements DiagnosticsLog {
                 entryWriter.init(pw);
                 this.printWriter = pw;
             }
+            default -> throw new IllegalStateException("Unknown outputType: " + outputType);
         }
     }
 
     private void openFileOutput() throws IOException {
-        File dir = diagnostics.loggingDirectory;
+        File dir = diagnostics.getLoggingDirectory();
         if (!dir.exists() && !dir.mkdirs()) {
             throw new IOException("JsonDiagnosticsLog: cannot create log directory: " + dir);
         }
@@ -215,8 +219,8 @@ public class JsonDiagnosticsLog implements DiagnosticsLog {
     }
 
     private File newFile(long index) {
-        String name = diagnostics.baseFileNameWithTime + String.format("%03d", index) + FILE_EXT;
-        return new File(diagnostics.loggingDirectory, name);
+        String name = diagnostics.getBaseFileNameWithTime() + String.format("%03d", index) + FILE_EXT;
+        return new File(diagnostics.getLoggingDirectory(), name);
     }
 
     private PrintWriter newPrintWriter(File file) throws IOException {
@@ -232,7 +236,7 @@ public class JsonDiagnosticsLog implements DiagnosticsLog {
         if (outputType != DiagnosticsOutputType.FILE || currentFile == null) {
             return;
         }
-        long maxBytes = (long) (diagnostics.maxRollingFileSizeMB * 1024 * 1024);
+        long maxBytes = (long) (diagnostics.getMaxRollingFileSizeMB() * BYTES_PER_MB);
         if (currentFile.length() < maxBytes) {
             return;
         }
@@ -243,7 +247,7 @@ public class JsonDiagnosticsLog implements DiagnosticsLog {
 
         // advance index
         currentFileIndex++;
-        int maxFiles = diagnostics.maxRollingFileCount;
+        int maxFiles = diagnostics.getMaxRollingFileCount();
         if (currentFileIndex >= maxFiles) {
             currentFileIndex = 0;
         }

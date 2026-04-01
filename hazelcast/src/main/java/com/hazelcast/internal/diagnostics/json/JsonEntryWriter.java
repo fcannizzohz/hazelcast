@@ -54,15 +54,23 @@ public final class JsonEntryWriter {
 
     // ---- allocation-free number formatting ----
     private static final char[] DIGITS = "0123456789".toCharArray();
-    private static final int LONG_BUF_SIZE = 20;  // max long digits + sign
+    /** Maximum digits in a signed long (19 digits) plus sign character. */
+    private static final int LONG_BUF_SIZE = 20;
     private static final int NUM_BUF_SIZE = 32;
+    private static final int DECIMAL_BASE = 10;
+    private static final int HEX_NIBBLE_SHIFT = 4;
+    private static final int HEX_NIBBLE_MASK = 0xF;
+    /** First printable ASCII character; control chars below this need escaping. */
+    private static final int FIRST_PRINTABLE_ASCII = 0x20;
 
     // ---- nesting depth ----
-    static final int MAX_DEPTH = 10;
+    /** Maximum nesting depth supported by this writer. */
+    private static final int MAX_DEPTH = 10;
 
     // ---- state ----
     private PrintWriter out;
-    private int depth = -1;   // -1 = no entry open
+    /** Current nesting depth; -1 means no entry is open. */
+    private int depth = -1;
 
     /** true when the next write at this depth needs no leading comma */
     private final boolean[] firstInLevel = new boolean[MAX_DEPTH];
@@ -311,11 +319,11 @@ public final class JsonEntryWriter {
                 case '\r': out.print("\\r");  break;
                 case '\t': out.print("\\t");  break;
                 default:
-                    if (c < 0x20) {
-                        // control characters: emit \uXXXX
+                    if (c < FIRST_PRINTABLE_ASCII) {
+                        // control characters: emit unicode escape sequence
                         out.print("\\u00");
-                        out.print(DIGITS[(c >> 4) & 0xF]);
-                        out.print(DIGITS[c & 0xF]);
+                        out.print(DIGITS[(c >> HEX_NIBBLE_SHIFT) & HEX_NIBBLE_MASK]);
+                        out.print(DIGITS[c & HEX_NIBBLE_MASK]);
                     } else {
                         out.write(c);
                     }
@@ -330,7 +338,8 @@ public final class JsonEntryWriter {
      */
     private void printLong(long value) {
         if (value == Long.MIN_VALUE) {
-            out.print(Long.MIN_VALUE);   // edge case: cannot negate MIN_VALUE
+            // Long.MIN_VALUE cannot be negated; delegate to JDK
+            out.print(Long.MIN_VALUE);
             return;
         }
         boolean negative = value < 0;
@@ -339,8 +348,8 @@ public final class JsonEntryWriter {
         }
         int pos = LONG_BUF_SIZE;
         do {
-            longBuf[--pos] = DIGITS[(int) (value % 10)];
-            value /= 10;
+            longBuf[--pos] = DIGITS[(int) (value % DECIMAL_BASE)];
+            value /= DECIMAL_BASE;
         } while (value > 0);
         if (negative) {
             longBuf[--pos] = '-';
