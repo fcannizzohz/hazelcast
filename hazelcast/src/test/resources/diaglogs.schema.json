@@ -480,8 +480,10 @@
             "SHUTDOWN",
             "MERGING",
             "MERGED",
+            "MERGE_FAILED",
             "CLIENT_CONNECTED",
-            "CLIENT_DISCONNECTED"
+            "CLIENT_DISCONNECTED",
+            "CLIENT_CHANGED_CLUSTER"
           ]
         }
       }
