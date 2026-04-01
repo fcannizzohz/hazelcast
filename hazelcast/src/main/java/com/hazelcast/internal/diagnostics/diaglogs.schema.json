@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "diagnostics-log-entry.schema.json",
+  "$id": "https://hazelcast.com/schemas/diagnostics-log-entry.schema.json",
   "title": "Hazelcast Diagnostics Log Entry",
   "description": "Schema for a single newline-delimited JSON object produced by Hazelcast Diagnostics when DiagnosticsLogFormat.JSON is configured. This schema validates one NDJSON line at a time. It applies to both native JSON output and STANDARD-to-JSON converted output, which must be structurally identical.",
   "$comment": "Unknown top-level name values are interpreted as StoreLatencyPlugin service names, per the current specification.",
