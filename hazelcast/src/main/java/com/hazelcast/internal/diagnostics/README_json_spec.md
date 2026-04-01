@@ -135,11 +135,11 @@ never JSON `null`. Examples:
 - `"UpstreamRevision"` in `BuildInfo` is absent when the build has no upstream.
 
 JSON `null` appears in two cases:
-- `writeKeyValueEntry(key, (String) null)` — used by `MetricsPlugin.collectNoValue`
-  when a metric was registered but had no value at collection time (e.g.
-  `"os.cpu.load": null`). In STANDARD format the same case writes `"NA"`.
-- `writeKeyValueEntry(key, (String) null)` in array items — e.g. `operationDetails`
-  in a `slowInvocations` array item when the operation details string is absent.
+- `writeNull(key)` — used by `MetricsPlugin.collectNoValue` when a metric was
+  registered but had no value at collection time (e.g. `"os.cpu.load": null`).
+  In STANDARD format the same case writes `"NA"`.
+- `writeString(key, null)` — e.g. `operationDetails` in a `slowInvocations`
+  array item when the operation details string is absent.
 
 ### Numeric types
 
@@ -247,21 +247,28 @@ Unit names are lower-cased (e.g. `bytes`, `ms`, `ns`, `percent`).
 
 ```typescript
 interface MetricContent {
-  [parsedMetricKey: string]: number | string | null;
-  // number  — collectLong / collectDouble
-  // string  — collectException (exception class + message)
-  // null    — collectNoValue (metric registered but no value at collection time)
+  [parsedMetricKey: string]: number | null | MetricException;
+  // number        — collectLong / collectDouble
+  // null          — collectNoValue (metric registered but no value at collection time)
+  // MetricException — collectException (metric collection threw)
   // key examples: "jvm.memory.heap.used(bytes)", "map.size[instance=myMap]", "os.cpu.load"
+}
+
+interface MetricException {
+  exceptionClass: string;
+  message:        string | null;
 }
 ```
 
 ```json
-{"epoch":1710849600000,"name":"Metric","content":{"jvm.memory.heap.used(bytes)":1048576,"jvm.memory.heap.used(percent)":68.4,"os.cpu.load":null,"map.size[instance=myMap]":42}}
+{"epoch":1710849600000,"name":"Metric","content":{"jvm.memory.heap.used(bytes)":1048576,"jvm.memory.heap.used(percent)":68.4,"os.cpu.load":null,"os.fd.count":{"exceptionClass":"java.lang.UnsupportedOperationException","message":"not supported on this platform"},"map.size[instance=myMap]":42}}
 ```
 
 > **STANDARD vs JSON difference:** STANDARD uses the raw `[metric=...,unit=...]`
 > bracket notation and emits one section per metric. JSON uses the parsed key
 > format and consolidates all metrics from one cycle into a single flat object.
+> STANDARD encodes exceptions as `"ClassName:message"` strings; JSON uses a
+> structured `{exceptionClass, message}` object.
 
 ---
 
@@ -283,10 +290,14 @@ interface WorkerSection {
 }
 
 interface SampleEntry {
-  eventType:   string;   // e.g. "IMap 'employees' UPDATED", "ICache 'myCache' CREATED"
-  sampleCount: number;
-  percentage:  number;   // fraction 0.0–1.0 (not 0–100)
+  // Known Hazelcast event types: serviceType + dataStructureName + eventType are all present
+  serviceType?:       string;   // "IMap" | "ICache" | "IQueue" | "ISet" | "IList"
+  dataStructureName?: string;   // name of the data structure (e.g. "employees")
+  eventType?:         string;   // event type name (e.g. "UPDATED"), or runnable class name for unknown types
+  sampleCount:        number;
+  percentage:         number;   // fraction 0.0–1.0 (not 0–100)
 }
+// Note: for unknown/custom event runnables, only eventType (class name) is present.
 ```
 
 ```json
@@ -296,8 +307,8 @@ interface SampleEntry {
     "sampleCount": 100,
     "samples": {
       "entries": [
-        { "eventType": "IMap 'employees' UPDATED", "sampleCount": 72, "percentage": 0.72 },
-        { "eventType": "IMap 'orders' ADDED",      "sampleCount": 28, "percentage": 0.28 }
+        { "serviceType": "IMap", "dataStructureName": "employees", "eventType": "UPDATED", "sampleCount": 72, "percentage": 0.72 },
+        { "serviceType": "IMap", "dataStructureName": "orders",    "eventType": "ADDED",   "sampleCount": 28, "percentage": 0.28 }
       ]
     }
   }
@@ -456,7 +467,7 @@ interface ConnectionContent {
   CloseCause?:  CloseCauseSection;  // present only when connection has a cause exception
 }
 interface ConnectionEntry {
-  connection: string;   // connection.toString()
+  remoteAddress: string;   // remote endpoint address, e.g. "192.168.1.11:5701"; "null" when unavailable
 }
 interface CloseCauseSection {
   entries: (ExceptionEntry | TextEntry)[];
@@ -473,7 +484,7 @@ interface ExceptionEntry {
 ```
 
 ```json
-{"epoch":1710849600000,"name":"ConnectionRemoved","content":{"entries":[{"connection":"Connection[192.168.1.11:5701->192.168.1.10:5701]"}],"type":"MEMBER","isAlive":false,"closeReason":"Connection closed by peer","CloseCause":{"entries":[{"exceptionClass":"java.io.EOFException","message":"Connection reset"},{"text":"at java.io.DataInputStream.readFully(DataInputStream.java:197)"},{"text":"at com.hazelcast.internal.nio.IOUtil.readFully(IOUtil.java:88)"}]}}}
+{"epoch":1710849600000,"name":"ConnectionRemoved","content":{"entries":[{"remoteAddress":"192.168.1.11:5701"}],"type":"MEMBER","isAlive":false,"closeReason":"Connection closed by peer","CloseCause":{"entries":[{"exceptionClass":"java.io.EOFException","message":"Connection reset"},{"text":"at java.io.DataInputStream.readFully(DataInputStream.java:197)"},{"text":"at com.hazelcast.internal.nio.IOUtil.readFully(IOUtil.java:88)"}]}}}
 ```
 
 #### ClusterVersionChanged
@@ -499,7 +510,7 @@ interface VersionEntry {
 
 ```typescript
 interface MigrationStateContent {
-  startTime:            string;   // "dd-MM-yyyy HH:mm:ss" string in BOTH STANDARD and JSON
+  startTime:            string;   // ISO-8601 UTC string, e.g. "2026-03-19T12:00:00Z"
   plannedMigrations:    number;
   completedMigrations:  number;
   remainingMigrations:  number;
@@ -509,7 +520,7 @@ interface MigrationStateContent {
 
 ```json
 {"epoch":1742385600000,"name":"MigrationState","content":{
-  "startTime": "19-03-2026 12:00:00",
+  "startTime": "2026-03-19T12:00:00Z",
   "plannedMigrations": 271,
   "completedMigrations": 10,
   "remainingMigrations": 261,
@@ -517,8 +528,8 @@ interface MigrationStateContent {
 }}
 ```
 
-> **`startTime` is a formatted string, not epoch ms**, in both formats.
-> `MigrationState.getStartTime()` does not expose an epoch value.
+> **`startTime` is an ISO-8601 UTC string** produced by `Instant.ofEpochMilli(...).toString()`.
+> STANDARD format uses a `"dd-MM-yyyy HH:mm:ss"` local-time string for the same field.
 
 #### MigrationCompleted / MigrationFailed
 
@@ -543,7 +554,7 @@ interface ReplicaMigrationContent {
   "replicaIndex": 1,
   "elapsedTime(ms)": 120,
   "MigrationState": {
-    "startTime": "19-03-2026 12:00:00",
+    "startTime": "2026-03-19T12:00:00Z",
     "plannedMigrations": 271,
     "completedMigrations": 11,
     "remainingMigrations": 260,
@@ -692,8 +703,8 @@ interface OverloadedConnectionsContent {
   connection: ConnectionEntry[];   // array; one item per overloaded queue scan
 }
 interface ConnectionEntry {
-  from:               string;   // local socket address, e.g. "/192.168.1.10:5701"
-  to:                 string;   // remote socket address, e.g. "/192.168.1.11:5701"
+  from:               string;   // local socket address, e.g. "192.168.1.10:5701"
+  to:                 string;   // remote socket address, e.g. "192.168.1.11:5701"
   urgentPacketCount?: number;   // present for the priority queue scan
   packetCount?:       number;   // present for the normal queue scan
   // exactly one of the above is present per entry
@@ -714,7 +725,7 @@ interface SampleEntry {
 > a single `"connection"` array so duplicate keys are impossible.
 
 ```json
-{"epoch":1710849600000,"name":"OverloadedConnections","content":{"connection":[{"from":"/192.168.1.10:5701","to":"/192.168.1.11:5701","packetCount":15000,"sampleCount":950,"samples":{"entries":[{"connectionType":"com.hazelcast.map.impl.operation.PutOperation","sampleCount":700,"percentage":0.736},{"connectionType":"com.hazelcast.map.impl.operation.GetOperation","sampleCount":250,"percentage":0.263}]}},{"from":"/192.168.1.10:5701","to":"/192.168.1.11:5701","urgentPacketCount":200,"sampleCount":50,"samples":{}}]}}
+{"epoch":1710849600000,"name":"OverloadedConnections","content":{"connection":[{"from":"192.168.1.10:5701","to":"192.168.1.11:5701","packetCount":15000,"sampleCount":950,"samples":{"entries":[{"connectionType":"com.hazelcast.map.impl.operation.PutOperation","sampleCount":700,"percentage":0.736},{"connectionType":"com.hazelcast.map.impl.operation.GetOperation","sampleCount":250,"percentage":0.263}]}},{"from":"192.168.1.10:5701","to":"192.168.1.11:5701","urgentPacketCount":200,"sampleCount":50,"samples":{}}]}}
 ```
 
 ---
@@ -734,17 +745,17 @@ interface StoreLatencyContent {
 interface DataStructureEntry {
   [methodName: string]: MethodEntry;
 }
-interface LatencyBucket {
-  lower_us: number;
-  upper_us: number;
-  count:    number;
-}
 interface MethodEntry {
-  count:                  number;
-  "totalTime(us)":        number;
-  "avg(us)":              number;
-  "max(us)":              number;
-  latency_distribution:   LatencyBucket[];   // only non-zero buckets
+  count:                   number;
+  "totalTime(us)":         number;
+  "avg(us)":               number;
+  "max(us)":               number;
+  latency_distribution:    LatencyDistributionBucket[];   // only non-zero buckets
+}
+interface LatencyDistributionBucket {
+  "lo(us)": number;   // inclusive lower bound in microseconds
+  "hi(us)": number;   // inclusive upper bound in microseconds
+  count:    number;   // number of observations in this bucket
 }
 ```
 
@@ -757,9 +768,9 @@ interface MethodEntry {
       "avg(us)": 42,
       "max(us)": 310,
       "latency_distribution": [
-        { "lower_us": 32,  "upper_us": 63,  "count": 60 },
-        { "lower_us": 64,  "upper_us": 127, "count": 35 },
-        { "lower_us": 256, "upper_us": 511, "count": 5  }
+        { "lo(us)": 0,   "hi(us)": 63,  "count": 60 },
+        { "lo(us)": 64,  "hi(us)": 127, "count": 35 },
+        { "lo(us)": 256, "hi(us)": 511, "count": 5  }
       ]
     },
     "store": {
@@ -768,16 +779,16 @@ interface MethodEntry {
       "avg(us)": 162,
       "max(us)": 450,
       "latency_distribution": [
-        { "lower_us": 128, "upper_us": 255, "count": 40 },
-        { "lower_us": 256, "upper_us": 511, "count": 10 }
+        { "lo(us)": 128, "hi(us)": 255, "count": 40 },
+        { "lo(us)": 256, "hi(us)": 511, "count": 10 }
       ]
     }
   }
 }}
 ```
 
-Only buckets with `value > 0` are emitted. Bounds come from
-`LatencyDistribution.bucketMinUs(bucket)` and `bucketMaxUs(bucket)`.
+Only buckets with `count > 0` are emitted. Bucket bounds are computed from
+`LatencyDistribution`: `lo(us) = (b == 0) ? 0 : 2^b`, `hi(us) = 2^(b+1) - 1`.
 
 ---
 
@@ -790,12 +801,13 @@ interface OperationsProfilerContent {
   [operationClassName: string]: LatencyEntry;   // only classes with count > 0
 }
 interface LatencyEntry {
-  count:                number;
-  "totalTime(us)":      number;
-  "avg(us)":            number;
-  "max(us)":            number;
-  latency_distribution: LatencyBucket[];   // see StoreLatencyPlugin for LatencyBucket definition
+  count:                  number;
+  "totalTime(us)":        number;
+  "avg(us)":              number;
+  "max(us)":              number;
+  latency_distribution:   LatencyDistributionBucket[];   // same format as StoreLatencyPlugin
 }
+// LatencyDistributionBucket: {lo(us), hi(us), count} — see StoreLatencyPlugin
 ```
 
 ```json
@@ -806,9 +818,9 @@ interface LatencyEntry {
     "avg(us)": 25,
     "max(us)": 310,
     "latency_distribution": [
-      { "lower_us": 16,  "upper_us": 31,  "count": 420 },
-      { "lower_us": 32,  "upper_us": 63,  "count": 75  },
-      { "lower_us": 256, "upper_us": 511, "count": 5   }
+      { "lo(us)": 16,  "hi(us)": 31,  "count": 420 },
+      { "lo(us)": 32,  "hi(us)": 63,  "count": 75  },
+      { "lo(us)": 256, "hi(us)": 511, "count": 5   }
     ]
   }
 }}
@@ -919,57 +931,64 @@ interface MemberAddressEntry {
 
 ```typescript
 interface InvocationsContent {
-  Pending?:     PendingInvocation[];   // array; absent when no slow invocations
-  History?:     SampleEntry[];         // array; absent when no occurrences
-  SlowHistory?: SampleEntry[];         // array; absent when no slow occurrences
+  Pending:     PendingSection;      // always present; entries absent when no slow invocations
+  History:     HistorySection;      // always present; entries absent when no occurrences recorded
+  SlowHistory: HistorySection;      // always present; entries absent when no slow occurrences
 }
 
-interface PendingInvocation {
-  Invocation: {
-    class:            string;    // fully-qualified operation class name
-    serviceName:      string | null;
-    identityHash:     number;
-    partitionId:      number;
-    replicaIndex:     number;
-    callId:           number;
-    invocationTimeMs: number;    // epoch ms
-    invocationTime:   string;    // "yyyy-MM-dd HH:mm:ss.SSS"
-    waitTimeout:      number;
-    callTimeout:      number;
-    tenantControl:    string;
-  };
-  tryCount:             number;
-  tryPauseMillis:       number;
-  invokeCount:          number;
-  callTimeoutMillis:    number;
-  firstInvocationTimeMs: number;
-  firstInvocationTime:  string;    // "yyyy-MM-dd HH:mm:ss.SSS"
-  lastHeartbeatMillis:  number;
-  lastHeartbeatTime:    string;    // "yyyy-MM-dd HH:mm:ss.SSS"
-  targetAddress:        string | null;
-  targetMember:         string | null;
-  memberListVersion:    number;
-  pendingResponse:      string;    // e.g. "{VOID}", "{CALL_TIMEOUT}"
-  backupsAcksExpected:  number;
-  backupsAcksReceived:  number;
-  connection:           string | null;
-  durationMs:           number;
-  // overflow sentinel: {"warning":"max number of invocations to print reached."}
+interface PendingSection {
+  entries?: (PendingEntry | TextEntry)[];   // absent when no slow invocations in this run
 }
 
-// Each SampleEntry is a single-key object: { "<fully-qualified-class-name>": count }
-type SampleEntry = Record<string, number>;
+interface PendingEntry {
+  operation: string;   // operation class name or descriptor from OperationDescriptors.toOperationDesc()
+                       // e.g. "GetOperation", "Backup[PutOperation]"
+  duration:  number;   // ms since first invocation time
+  unit:      "ms";
+}
+
+// Emitted when the slow-invocation count exceeds the configured max (default 100)
+interface TextEntry {
+  text: "max number of invocations to print reached.";
+}
+
+interface HistorySection {
+  entries?: HistoryEntry[];   // absent when no occurrences accumulated since startup
+}
+
+interface HistoryEntry {
+  operation: string;   // same descriptor format as PendingEntry.operation
+  samples:   number;   // cumulative count since startup (not reset between runs)
+}
 ```
 
 ```json
-{"epoch":1710849600000,"name":"Invocations","content":{"Pending":[{"Invocation":{"class":"com.hazelcast.map.impl.operation.PutOperation","serviceName":"hz:impl:mapService","identityHash":123456789,"partitionId":42,"replicaIndex":0,"callId":9001,"invocationTimeMs":1710849588000,"invocationTime":"2025-03-19 12:59:48.000","waitTimeout":-1,"callTimeout":60000,"tenantControl":"com.hazelcast.spi.impl.tenantcontrol.NoopTenantControl@0"},"tryCount":250,"tryPauseMillis":500,"invokeCount":1,"callTimeoutMillis":60000,"firstInvocationTimeMs":1710849588010,"firstInvocationTime":"2025-03-19 12:59:48.010","lastHeartbeatMillis":1710849599000,"lastHeartbeatTime":"2025-03-19 12:59:59.000","targetAddress":"[10.0.0.1]:5701","targetMember":"Member [10.0.0.1]:5701 - uuid this","memberListVersion":3,"pendingResponse":"{VOID}","backupsAcksExpected":-1,"backupsAcksReceived":0,"connection":null,"durationMs":12000}],"History":[{"com.hazelcast.map.impl.operation.PutOperation":50},{"com.hazelcast.map.impl.operation.GetOperation":12}],"SlowHistory":[{"com.hazelcast.map.impl.operation.PutOperation":2}]}}
+{"epoch":1710849600000,"name":"Invocations","content":{
+  "Pending": {
+    "entries": [
+      { "operation": "PutOperation", "duration": 12000, "unit": "ms" },
+      { "operation": "Backup[GetOperation]", "duration": 8500, "unit": "ms" }
+    ]
+  },
+  "History": {
+    "entries": [
+      { "operation": "PutOperation", "samples": 250 },
+      { "operation": "GetOperation", "samples": 120 }
+    ]
+  },
+  "SlowHistory": {
+    "entries": [
+      { "operation": "PutOperation", "samples": 3 }
+    ]
+  }
+}}
 ```
 
-> **STANDARD vs JSON difference:** STANDARD wraps `Pending` and the history sections as
-> named sub-sections (objects). JSON renders each as a named array directly inside
-> `"content"`. The `"History"` and `"SlowHistory"` arrays use the operation class name as
-> the key in each single-key object rather than the `"operation"`/`"samples"` pair used
-> in the old structured-entry format.
+> **STANDARD vs JSON difference:** STANDARD writes each pending invocation as a
+> multi-line block with every `Invocation.toString()` field expanded. JSON emits
+> only the operation descriptor and duration — the composite `toString()` string
+> is not used. History/SlowHistory use `{operation, samples}` pairs rather than
+> single-key `{className: count}` objects.
 
 ---
 
@@ -1010,13 +1029,13 @@ The following call sites use format-aware branching to emit structured JSON:
 | `SystemLogPlugin.render(LifecycleEvent)` | lifecycle state | `"state"` |
 | `SystemLogPlugin.render(Version)` | cluster version | `"version"` |
 | `SystemLogPlugin.render(MembershipEvent)` | member list entries | `"address"`, `"isThis"`, `"isMaster"` |
-| `SystemLogPlugin.render(ConnectionEvent)` | connection string | `"connection"` |
+| `SystemLogPlugin.render(ConnectionEvent)` | remote address | `"remoteAddress"` |
 | `SystemLogPlugin.renderConnectionClose` | close cause | `"exceptionClass"`, `"message"` |
 | `MemberHazelcastInstanceInfoPlugin.run` | member addresses | `"address"` |
 | `PendingInvocationsPlugin.renderInvocations` | pending ops | `"operation"`, `"count"` |
-| `EventQueuePlugin.renderSamples` | event type samples | `"eventType"`, `"sampleCount"`, `"percentage"` |
-| `InvocationSamplePlugin.runCurrent` | slow pending invocations | each rendered as a `"Pending"` array item with a nested `"Invocation"` object (op fields) plus all invocation-level fields and `"durationMs"`; overflow as `{"warning":"..."}` |
-| `InvocationSamplePlugin.renderOccurrences` | `"History"` / `"SlowHistory"` | each rendered as a `"History"` / `"SlowHistory"` array item `{"<class>": count}` |
+| `EventQueuePlugin.renderSamples` | event type samples | `"serviceType"` + `"dataStructureName"` + `"eventType"` for known types; `"eventType"` (class name) for unknown; `"sampleCount"`, `"percentage"` |
+| `InvocationSamplePlugin.writePending` | slow pending invocations | `"operation"` (descriptor string), `"duration"` (ms), `"unit"` (`"ms"`); overflow as `{"text":"..."}` |
+| `InvocationSamplePlugin.writeHistory` / `writeSlowHistory` | `"History"` / `"SlowHistory"` | each entry: `{"operation": descriptor, "samples": count}` |
 | `OperationThreadSamplerPlugin.write` | thread samples | `"operation"`, `"samples"`, `"percentage"` |
 | `OverloadedConnectionsPlugin.renderJson` | connection array items | `"from"`, `"to"`, `"packetCount"`/`"urgentPacketCount"`, `"sampleCount"`, nested `"samples"` section |
 | `OverloadedConnectionsPlugin.renderSamples` | connection type samples | `"connectionType"`, `"sampleCount"`, `"percentage"` |

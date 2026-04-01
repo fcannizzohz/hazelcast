@@ -181,7 +181,7 @@ public class JsonSystemLogPlugin extends JsonDiagnosticsPlugin {
             return;
         }
         writer.startEntry(epoch, name);
-        writer.writeString("member", event.getMember().getAddress().toString());
+        writer.writeString("member", formatAddress(event.getMember().getAddress()));
         writer.startObject("Members");
         writer.startArray("entries");
         Set<Member> members = event.getMembers();
@@ -189,7 +189,7 @@ public class JsonSystemLogPlugin extends JsonDiagnosticsPlugin {
             boolean first = true;
             for (Member member : members) {
                 writer.startArrayItem();
-                writer.writeString("address", member.getAddress().toString());
+                writer.writeString("address", formatAddress(member.getAddress()));
                 writer.writeBoolean("isThis", member.getAddress().equals(thisAddress));
                 writer.writeBoolean("isMaster", first);
                 writer.endArrayItem();
@@ -239,7 +239,8 @@ public class JsonSystemLogPlugin extends JsonDiagnosticsPlugin {
         Connection connection = event.connection;
         writer.startArray("entries");
         writer.startArrayItem();
-        writer.writeString("connection", connection.toString());
+        Address remoteAddr = connection.getRemoteAddress();
+        writer.writeString("remoteAddress", remoteAddr != null ? formatAddress(remoteAddr) : "null");
         writer.endArrayItem();
         writer.endArray();
         if (connection instanceof ServerConnection serverConnection) {

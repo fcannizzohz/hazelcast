@@ -60,7 +60,7 @@ import static java.util.concurrent.TimeUnit.MINUTES;
  * of potential performance and stability issues. The actual logic to provide such
  * insights, is placed in the {@link DiagnosticsPlugin}.
  */
-@SuppressWarnings("WeakerAccess")
+@SuppressWarnings({"WeakerAccess", "checkstyle:methodcount"})
 public class Diagnostics {
 
     /**
@@ -288,6 +288,36 @@ public class Diagnostics {
 
     public DiagnosticsOutputType getOutputType() {
         return outputType;
+    }
+
+    public DiagnosticsLogFormat getLogFormat() {
+        return logFormat;
+    }
+
+    /**
+     * Registers a {@link com.hazelcast.internal.diagnostics.json.JsonDiagnosticsPlugin} with the
+     * {@link com.hazelcast.internal.diagnostics.json.JsonDiagnosticsLog}.
+     * Must be called before {@link #startJsonLog()}.
+     * No-op if the current log is not a {@code JsonDiagnosticsLog}.
+     *
+     * @param plugin the JSON plugin to register
+     */
+    public void registerJsonPlugin(com.hazelcast.internal.diagnostics.json.JsonDiagnosticsPlugin plugin) {
+        if (diagnosticsLog instanceof com.hazelcast.internal.diagnostics.json.JsonDiagnosticsLog jsonLog) {
+            jsonLog.registerPlugin(plugin);
+        }
+    }
+
+    /**
+     * Starts the {@link com.hazelcast.internal.diagnostics.json.JsonDiagnosticsLog} scheduler after
+     * all JSON plugins have been registered via {@link #registerJsonPlugin}.
+     * Must be called after all calls to {@link #registerJsonPlugin}.
+     * No-op if the current log is not a {@code JsonDiagnosticsLog}.
+     */
+    public void startJsonLog() {
+        if (diagnosticsLog instanceof com.hazelcast.internal.diagnostics.json.JsonDiagnosticsLog jsonLog) {
+            jsonLog.start();
+        }
     }
 
     public DiagnosticsMetricCollector getMetricCollector() {

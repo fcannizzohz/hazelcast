@@ -297,23 +297,30 @@
       "type": "object",
       "additionalProperties": { "type": "string" }
     },
-    "latencyDistribution": {
+    "latencyDistributionBucket": {
       "type": "object",
       "additionalProperties": false,
-      "patternProperties": {
-        "^.+$": { "type": "integer", "minimum": 0 }
+      "required": ["lo(us)", "hi(us)", "count"],
+      "properties": {
+        "lo(us)": { "type": "integer", "minimum": 0 },
+        "hi(us)": { "type": "integer", "minimum": 0 },
+        "count": { "type": "integer", "minimum": 0 }
       }
+    },
+    "latencyDistribution": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/latencyDistributionBucket" }
     },
     "latencyEntry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["count", "totalTime(us)", "avg(us)", "max(us)", "latency-distribution"],
+      "required": ["count", "totalTime(us)", "avg(us)", "max(us)", "latency_distribution"],
       "properties": {
         "count": { "type": "integer", "minimum": 0 },
         "totalTime(us)": { "type": "integer", "minimum": 0 },
         "avg(us)": { "type": "integer", "minimum": 0 },
         "max(us)": { "type": "integer", "minimum": 0 },
-        "latency-distribution": { "$ref": "#/$defs/latencyDistribution" }
+        "latency_distribution": { "$ref": "#/$defs/latencyDistribution" }
       }
     },
     "buildInfoContent": {
@@ -330,6 +337,15 @@
         "Enterprise": { "type": "boolean" }
       }
     },
+    "metricExceptionValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exceptionClass"],
+      "properties": {
+        "exceptionClass": { "type": "string" },
+        "message": { "type": ["string", "null"] }
+      }
+    },
     "metricContent": {
       "type": "object",
       "additionalProperties": false,
@@ -338,7 +354,8 @@
           "anyOf": [
             { "type": "number" },
             { "type": "string" },
-            { "type": "null" }
+            { "type": "null" },
+            { "$ref": "#/$defs/metricExceptionValue" }
           ]
         }
       }
@@ -346,9 +363,11 @@
     "eventQueueSampleEntry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["eventType", "sampleCount", "percentage"],
+      "required": ["sampleCount", "percentage"],
       "properties": {
-        "eventType": { "type": "string" },
+        "serviceType": { "type": "string", "description": "Service type: IMap, ICache, IQueue, ISet, IList. Present for known Hazelcast event types." },
+        "dataStructureName": { "type": "string", "description": "Name of the data structure. Present when serviceType is present." },
+        "eventType": { "type": "string", "description": "Event type name, or the runnable class name for unknown event types." },
         "sampleCount": { "type": "integer", "minimum": 0 },
         "percentage": { "type": "number", "minimum": 0, "maximum": 1 }
       }
@@ -534,9 +553,9 @@
     "connectionEntry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["connection"],
+      "required": ["remoteAddress"],
       "properties": {
-        "connection": { "type": "string" }
+        "remoteAddress": { "type": "string", "description": "Remote endpoint address in host:port format." }
       }
     },
     "exceptionEntry": {
@@ -852,9 +871,9 @@
     "pendingInvocationSampleEntry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["description", "duration", "unit"],
+      "required": ["operation", "duration", "unit"],
       "properties": {
-        "description": { "type": "string" },
+        "operation": { "type": "string", "description": "Operation class name or descriptor (e.g. GetOperation, Backup[GetOperation])." },
         "duration": { "type": "integer", "minimum": 0 },
         "unit": { "const": "ms" }
       }

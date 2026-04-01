@@ -79,14 +79,20 @@ public class JsonOperationProfilerPlugin extends JsonDiagnosticsPlugin {
             writer.writeLong("totalTime(us)", dist.totalMicros());
             writer.writeLong("avg(us)", dist.avgMicros());
             writer.writeLong("max(us)", dist.maxMicros());
-            writer.startObject("latency-distribution");
+            writer.startArray("latency_distribution");
             for (int b = 0; b < dist.bucketCount(); b++) {
                 long value = dist.bucket(b);
                 if (value > 0) {
-                    writer.writeLong(LatencyDistribution.LATENCY_KEYS[b], value);
+                    long lo = (b == 0) ? 0L : (1L << b);
+                    long hi = (1L << (b + 1)) - 1;
+                    writer.startArrayItem();
+                    writer.writeLong("lo(us)", lo);
+                    writer.writeLong("hi(us)", hi);
+                    writer.writeLong("count", value);
+                    writer.endArrayItem();
                 }
             }
-            writer.endObject();
+            writer.endArray();
             writer.endObject();
         }
     }

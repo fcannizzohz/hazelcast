@@ -16,6 +16,7 @@
 
 package com.hazelcast.internal.diagnostics.json;
 
+import com.hazelcast.cluster.Address;
 import com.hazelcast.internal.diagnostics.DiagnosticsPlugin;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.spi.properties.HazelcastProperties;
@@ -91,6 +92,16 @@ public abstract class JsonDiagnosticsPlugin {
      * Subclasses that registered listeners or hold resources override this.
      */
     public void onShutdown() {
+    }
+
+    // ------------------------------------------------------------------ address helpers
+
+    /**
+     * Formats a Hazelcast {@link Address} as {@code host:port} (no brackets around the host).
+     * {@link Address#toString()} produces {@code [host]:port} which is not desired.
+     */
+    protected static String formatAddress(Address address) {
+        return address.getHost() + ":" + address.getPort();
     }
 
     // ------------------------------------------------------------------ property helpers

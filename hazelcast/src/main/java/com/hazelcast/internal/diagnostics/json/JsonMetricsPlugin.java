@@ -104,7 +104,10 @@ public class JsonMetricsPlugin extends JsonDiagnosticsPlugin {
         public void collectException(MetricDescriptor descriptor, Exception e) {
             if (writer != null && descriptor.isTargetIncluded(DIAGNOSTICS)) {
                 writer.startEntry(timeMillis, ENTRY_NAME);
-                writer.writeString(descriptor.metricString(), e.getClass().getName() + ':' + e.getMessage());
+                writer.startObject(descriptor.metricString());
+                writer.writeString("exceptionClass", e.getClass().getName());
+                writer.writeString("message", e.getMessage());
+                writer.endObject();
                 writer.endEntry();
             }
         }
