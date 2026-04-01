@@ -154,6 +154,18 @@ public class Diagnostics {
             DiagnosticsOutputType.FILE);
 
     /**
+     * Selects the output format for diagnostics logs.
+     * <p>Accepted values: {@code STANDARD} (default, human-readable text) or
+     * {@code JSON} (newline-delimited JSON / NDJSON).
+     * <p>Can also be configured programmatically via
+     * {@link DiagnosticsConfig#setLogFormat(DiagnosticsLogFormat)}.
+     *
+     * @since 6.0
+     */
+    public static final HazelcastProperty LOG_FORMAT =
+            new HazelcastProperty("hazelcast.diagnostics.log.format", DiagnosticsLogFormat.STANDARD);
+
+    /**
      * The diagnostics service is shutdown completely,
      * so that registered plugins will stop to be working and resources will be released.
      */
@@ -202,6 +214,7 @@ public class Diagnostics {
     // each start of the diagnostics service will create a new time stamp for that "session"
     private String baseFileNameWithTime;
     private DiagnosticsOutputType outputType;
+    private DiagnosticsLogFormat logFormat;
     private DiagnosticsConfig config = new DiagnosticsConfig();
     private File loggingDirectory = new File(DIRECTORY.getDefaultValue());
     private String filePrefix;
@@ -315,6 +328,16 @@ public class Diagnostics {
      */
     public void register(DiagnosticsPlugin plugin) {
         checkNotNull(plugin, "plugin can't be null");
+
+        // In JSON mode all data collection is handled by the dedicated JSON plugin
+        // implementations inside JsonDiagnosticsLog. The existing STANDARD plugins
+        // would run in parallel and waste CPU/memory, so we skip them here.
+        // StoreLatencyPlugin is the exception: its subclass (JsonStoreLatencyPlugin)
+        // IS the instrumentation point for map stores and must still be registered.
+        if (logFormat == DiagnosticsLogFormat.JSON
+                && !(plugin instanceof com.hazelcast.internal.diagnostics.StoreLatencyPlugin)) {
+            return;
+        }
 
         plugin.setProperties(config.getPluginProperties());
         long periodMillis = plugin.getPeriodMillis();
@@ -580,6 +603,9 @@ public class Diagnostics {
     }
 
     public static DiagnosticsLog newLog(Diagnostics diagnostics) {
+        if (diagnostics.logFormat == DiagnosticsLogFormat.JSON) {
+            return new com.hazelcast.internal.diagnostics.json.JsonDiagnosticsLog(diagnostics);
+        }
         // class type usage of enums cannot be used as enum. So redefined the newLog here.
         return switch (diagnostics.outputType) {
             case FILE -> new DiagnosticsLogFile(diagnostics);
@@ -636,6 +662,13 @@ public class Diagnostics {
             this.outputType = newConfig.getOutputType();
         }
 
+        if (hazelcastProperties.containsKey(LOG_FORMAT)) {
+            this.logFormat = hazelcastProperties.getEnum(LOG_FORMAT, DiagnosticsLogFormat.class);
+            messages.add(LOG_FORMAT.getName() + " = " + logFormat);
+        } else {
+            this.logFormat = newConfig.getLogFormat();
+        }
+
         if (hazelcastProperties.containsKey(MAX_ROLLED_FILE_SIZE_MB)) {
             this.maxRollingFileSizeMB = hazelcastProperties.getFloat(MAX_ROLLED_FILE_SIZE_MB);
             messages.add(MAX_ROLLED_FILE_SIZE_MB.getName() + " = "
@@ -686,6 +719,7 @@ public class Diagnostics {
 
         // the config may be overridden by the properties, so we need to set it again
         this.config.setOutputType(outputType);
+        this.config.setLogFormat(logFormat);
         this.config.setMaxRolledFileSizeInMB(maxRollingFileSizeMB);
         this.config.setMaxRolledFileCount(maxRollingFileCount);
         this.config.setLogDirectory(loggingDirectory.getAbsolutePath());
