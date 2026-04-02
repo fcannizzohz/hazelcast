@@ -341,6 +341,18 @@ public class Diagnostics {
      * @param <P>         type of the plugin
      * @return the DiagnosticsPlugin found, or {@code null} if not active
      */
+    /**
+     * Returns an unmodifiable view of all plugins registered in the standard plugin registry.
+     * Used by {@link com.hazelcast.internal.diagnostics.json.JsonDiagnosticsLog} to discover
+     * {@link com.hazelcast.internal.diagnostics.json.JsonSchedulable} plugins without
+     * hard-coding specific subclass types.
+     *
+     * @return unmodifiable collection of registered plugins
+     */
+    public java.util.Collection<DiagnosticsPlugin> getRegisteredPlugins() {
+        return Collections.unmodifiableCollection(pluginsMap.values());
+    }
+
     @SuppressWarnings("unchecked")
     public <P extends DiagnosticsPlugin> P getPlugin(Class<P> pluginClass) {
         // although plugins are kept in the map while service is disabled,

@@ -30,9 +30,12 @@ import static java.util.concurrent.TimeUnit.SECONDS;
  * JSON diagnostics plugin that periodically emits all metrics from the
  * {@link MetricsRegistry}.
  *
- * <p>Each metric produces one NDJSON line with {@code "name":"Metric"} and a
- * single key in {@code "content"} whose name is the metric descriptor string
- * and whose value is a number, string, or null.
+ * <p>One {@code metricsRegistry.collect()} call produces exactly <b>one</b> NDJSON
+ * line with {@code "name":"Metric"}.  All metrics in the collection cycle are
+ * emitted as flat key-value pairs inside {@code "content"} — no per-metric
+ * envelope, no wrapper objects.  This makes each line a self-contained snapshot
+ * of the full metric state at that instant, which is the natural unit for
+ * Loki stream ingestion and cross-metric jq correlation.
  *
  * <p>Uses the same property and period as the standard
  * {@link com.hazelcast.internal.diagnostics.MetricsPlugin}.
@@ -66,11 +69,13 @@ public class JsonMetricsPlugin extends JsonDiagnosticsPlugin {
 
     @Override
     public void run(JsonEntryWriter writer) {
+        // One startEntry/endEntry pair wraps the entire collection cycle so that
+        // all metrics end up as flat key-value pairs in a single NDJSON line.
+        writer.startEntry(System.currentTimeMillis(), ENTRY_NAME);
         collector.writer = writer;
-        // snapshot the timestamp so all metrics in this run share the same epoch
-        collector.timeMillis = System.currentTimeMillis();
         metricsRegistry.collect(collector);
         collector.writer = null;
+        writer.endEntry();
     }
 
     // ------------------------------------------------------------------ collector
@@ -80,44 +85,35 @@ public class JsonMetricsPlugin extends JsonDiagnosticsPlugin {
         private static final String ENTRY_NAME = "Metric";
 
         private JsonEntryWriter writer;
-        private long timeMillis;
 
         @Override
         public void collectLong(MetricDescriptor descriptor, long value) {
             if (writer != null && descriptor.isTargetIncluded(DIAGNOSTICS)) {
-                writer.startEntry(timeMillis, ENTRY_NAME);
                 writer.writeLong(descriptor.metricString(), value);
-                writer.endEntry();
             }
         }
 
         @Override
         public void collectDouble(MetricDescriptor descriptor, double value) {
             if (writer != null && descriptor.isTargetIncluded(DIAGNOSTICS)) {
-                writer.startEntry(timeMillis, ENTRY_NAME);
                 writer.writeDouble(descriptor.metricString(), value);
-                writer.endEntry();
             }
         }
 
         @Override
         public void collectException(MetricDescriptor descriptor, Exception e) {
             if (writer != null && descriptor.isTargetIncluded(DIAGNOSTICS)) {
-                writer.startEntry(timeMillis, ENTRY_NAME);
                 writer.startObject(descriptor.metricString());
                 writer.writeString("exceptionClass", e.getClass().getName());
                 writer.writeString("message", e.getMessage());
                 writer.endObject();
-                writer.endEntry();
             }
         }
 
         @Override
         public void collectNoValue(MetricDescriptor descriptor) {
             if (writer != null && descriptor.isTargetIncluded(DIAGNOSTICS)) {
-                writer.startEntry(timeMillis, ENTRY_NAME);
                 writer.writeNull(descriptor.metricString());
-                writer.endEntry();
             }
         }
     }

@@ -48,7 +48,7 @@ import java.util.concurrent.ConcurrentMap;
  *
  * @since 6.0
  */
-public class JsonStoreLatencyPlugin extends StoreLatencyPlugin {
+public class JsonStoreLatencyPlugin extends StoreLatencyPlugin implements JsonSchedulable {
 
     /**
      * Three-level map: serviceName → dataStructureName → methodName → distribution.
@@ -116,7 +116,8 @@ public class JsonStoreLatencyPlugin extends StoreLatencyPlugin {
 
     private void renderService(JsonEntryWriter writer, long epoch, String serviceName,
                                 ConcurrentMap<String, ConcurrentMap<String, LatencyDistribution>> dsMap) {
-        writer.startEntry(epoch, serviceName);
+        writer.startEntry(epoch, "StoreLatency");
+        writer.writeString("service", serviceName);
         for (Map.Entry<String, ConcurrentMap<String, LatencyDistribution>> dsEntry : dsMap.entrySet()) {
             writer.startObject(dsEntry.getKey());
             for (Map.Entry<String, LatencyDistribution> methodEntry : dsEntry.getValue().entrySet()) {

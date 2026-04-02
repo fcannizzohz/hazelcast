@@ -94,10 +94,11 @@ public class JsonStoreLatencyPluginTest {
         assertFalse(output.isEmpty());
 
         JsonNode root = MAPPER.readTree(output);
-        assertEquals("MapStore", root.get("name").asText());
+        assertEquals("StoreLatency", root.get("name").asText());
         assertTrue(root.get("epoch").asLong() > 0);
         assertNotNull(root.get("content"));
 
+        assertEquals("MapStore", root.get("content").get("service").asText());
         JsonNode mapContent = root.get("content").get("myMap");
         assertNotNull("Data structure entry required", mapContent);
 
@@ -120,7 +121,7 @@ public class JsonStoreLatencyPluginTest {
     }
 
     @Test
-    public void testRunJson_multipleServicesProduceMultipleLines() {
+    public void testRunJson_multipleServicesProduceMultipleLines() throws Exception {
         LatencyProbe probe1 = plugin.newProbe("MapStore", "myMap", "load");
         LatencyProbe probe2 = plugin.newProbe("CacheStore", "myCache", "write");
         probe1.recordValue(TimeUnit.MICROSECONDS.toNanos(10));
@@ -130,8 +131,12 @@ public class JsonStoreLatencyPluginTest {
 
         String[] lines = sw.toString().split("\n");
         assertEquals(2, lines.length);
-        DiagnosticsSchemaValidator.get().assertValid(lines[0]);
-        DiagnosticsSchemaValidator.get().assertValid(lines[1]);
+        for (String line : lines) {
+            DiagnosticsSchemaValidator.get().assertValid(line);
+            JsonNode root = MAPPER.readTree(line);
+            assertEquals("StoreLatency", root.get("name").asText());
+            assertNotNull("service field required", root.get("content").get("service"));
+        }
     }
 
     @Test
