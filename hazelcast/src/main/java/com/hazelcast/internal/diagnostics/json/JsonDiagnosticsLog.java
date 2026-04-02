@@ -20,7 +20,6 @@ import com.hazelcast.internal.diagnostics.Diagnostics;
 import com.hazelcast.internal.diagnostics.DiagnosticsLog;
 import com.hazelcast.internal.diagnostics.DiagnosticsOutputType;
 import com.hazelcast.internal.diagnostics.DiagnosticsPlugin;
-import com.hazelcast.internal.diagnostics.StoreLatencyPlugin;
 import com.hazelcast.logging.ILogger;
 
 import java.io.BufferedWriter;
@@ -143,15 +142,18 @@ public class JsonDiagnosticsLog implements DiagnosticsLog {
             }
         }
 
-        // JsonStoreLatencyPlugin is registered in the standard Diagnostics system (not in the JSON plugin
-        // list) because store wrappers look it up via Diagnostics.getPlugin(StoreLatencyPlugin.class).
-        // Schedule its JSON output here so it runs on the JSON scheduler thread.
-        StoreLatencyPlugin storePlugin = diagnostics.getPlugin(StoreLatencyPlugin.class);
-        if (storePlugin instanceof JsonStoreLatencyPlugin jsonStorePlugin) {
-            long period = jsonStorePlugin.getPeriodMillis();
-            if (period > JsonDiagnosticsPlugin.DISABLED_PERIOD_MS) {
-                futures.add(scheduler.scheduleAtFixedRate(
-                        new RunJsonStoreLatencyTask(jsonStorePlugin), 0, period, MILLISECONDS));
+        // Discover any DiagnosticsPlugin registered in the standard registry that also
+        // implements JsonSchedulable (e.g. JsonStoreLatencyPlugin).  These plugins are
+        // registered via Diagnostics.register() rather than registerJsonPlugin() because
+        // other subsystems look them up by base class.  Schedule their runJson() here so
+        // they run on the JSON scheduler thread alongside the normal JSON plugins.
+        for (DiagnosticsPlugin plugin : diagnostics.getRegisteredPlugins()) {
+            if (plugin instanceof JsonSchedulable schedulable) {
+                long period = schedulable.getPeriodMillis();
+                if (period > JsonDiagnosticsPlugin.DISABLED_PERIOD_MS) {
+                    futures.add(scheduler.scheduleAtFixedRate(
+                            new RunJsonSchedulableTask(schedulable), 0, period, MILLISECONDS));
+                }
             }
         }
     }
@@ -305,23 +307,23 @@ public class JsonDiagnosticsLog implements DiagnosticsLog {
         }
     }
 
-    private final class RunJsonStoreLatencyTask implements Runnable {
-        private final JsonStoreLatencyPlugin plugin;
+    private final class RunJsonSchedulableTask implements Runnable {
+        private final JsonSchedulable schedulable;
 
-        RunJsonStoreLatencyTask(JsonStoreLatencyPlugin plugin) {
-            this.plugin = plugin;
+        RunJsonSchedulableTask(JsonSchedulable schedulable) {
+            this.schedulable = schedulable;
         }
 
         @Override
         public void run() {
             try {
                 maybeRoll();
-                plugin.runJson(entryWriter);
+                schedulable.runJson(entryWriter);
                 if (printWriter != null) {
                     printWriter.flush();
                 }
             } catch (Throwable t) {
-                logger.warning("JsonStoreLatencyPlugin runJson() failed", t);
+                logger.warning("JsonSchedulable.runJson() failed: " + schedulable.getClass(), t);
             }
         }
     }

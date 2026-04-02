@@ -86,12 +86,7 @@ Every JSON line carries a `name` field that identifies its content schema.
 | `"OperationThreadSamples"` | `OperationThreadSamplerPlugin` | [OperationThreadSamples](#operationthreadsamplereplugin) |
 | `"HazelcastInstance"` | `MemberHazelcastInstanceInfoPlugin` | [HazelcastInstance](#memberhazelcastinstanceinfoplugin) |
 | `"Invocations"` | `InvocationSamplePlugin` | [Invocations](#invocationsampleplugin) |
-| *(any other string)* | `StoreLatencyPlugin` | [StoreLatency](#storelatencyplugin) |
-
-> **`StoreLatencyPlugin` caveat:** `StoreLatencyPlugin` sets `name` to the
-> service name (e.g. `"MapService"`, `"CacheService"`). These service names are
-> not reserved and not in the table above. Parsers should treat any `name` value
-> that does not appear in the table as a potential `StoreLatencyPlugin` line.
+| `"StoreLatency"` | `StoreLatencyPlugin` | [StoreLatency](#storelatencyplugin) |
 
 ### Emission semantics (when a line is produced)
 
@@ -732,14 +727,15 @@ interface SampleEntry {
 
 ### StoreLatencyPlugin
 
-**`name`:** *service name* (dynamic, e.g. `"MapService"`, `"CacheService"`) | periodic (disabled by default)
+**`name`:** `"StoreLatency"` | periodic (disabled by default)
 
-One JSON line per service with recorded probes. The `name` value is not a fixed
-constant — it is whatever string was passed to `newProbe(serviceName, ...)`.
+One JSON line per service with recorded probes. `content.service` identifies
+which Hazelcast service the line belongs to (e.g. `"MapService"`, `"CacheService"`).
+All other keys in `content` are data-structure names containing per-method latency data.
 
 ```typescript
-// Envelope name = serviceName (dynamic)
 interface StoreLatencyContent {
+  service:                   string;           // service name passed to newProbe()
   [dataStructureName: string]: DataStructureEntry;
 }
 interface DataStructureEntry {
@@ -760,7 +756,8 @@ interface LatencyDistributionBucket {
 ```
 
 ```json
-{"epoch":1742385600000,"name":"MapService","content":{
+{"epoch":1742385600000,"name":"StoreLatency","content":{
+  "service": "MapService",
   "employees": {
     "load": {
       "count": 100,
@@ -994,62 +991,109 @@ interface HistoryEntry {
 
 ## Implementation
 
-| Class | Role |
-|-------|------|
-| `DiagnosticsLogFormat` | Enum: `STANDARD`, `JSON` |
-| `DiagnosticsLogWriterFactory` | Creates the right writer based on `DiagnosticsLogFormat` |
-| `DiagnosticsLogWriterJsonImpl` | Stateful JSON writer; emits one JSON line per top-level `startSection`/`endSection` pair |
- `DiagnosticEntry` POJO and can serialize it back to JSON |
-| `DiagnosticsConfig` | Holds the `logFormat` field; serialized/deserialized via `IdentifiedDataSerializable` |
+### JSON subsystem class inventory
 
-### Key design decisions
+| Class | Package | Role |
+|-------|---------|------|
+| `DiagnosticsLogFormat` | `diagnostics` | Enum: `STANDARD` (default), `JSON` |
+| `DiagnosticsConfig` | `diagnostics` | Holds `logFormat` field; serialized via `IdentifiedDataSerializable` |
+| `JsonDiagnosticsPlugin` | `diagnostics.json` | Abstract base for all JSON plugins; owns scheduling constants and property helpers |
+| `JsonEntryWriter` | `diagnostics.json` | Zero-allocation NDJSON writer; one `startEntry`/`endEntry` pair = one line |
+| `JsonDiagnosticsLog` | `diagnostics.json` | `DiagnosticsLog` implementation for JSON mode; owns a single-thread scheduler, manages all `JsonDiagnosticsPlugin` instances, handles rolling files (`.jsonl`) |
+| `Json*Plugin` | `diagnostics.json` | One class per plugin/event type; implements `run(JsonEntryWriter)` |
+| `JsonStoreLatencyPlugin` | `diagnostics.json` | Extends `StoreLatencyPlugin` so store wrappers can find it via `Diagnostics.getPlugin(StoreLatencyPlugin.class)`; JSON output via `runJson(JsonEntryWriter)` instead of the standard `run(DiagnosticsLogWriter)` |
 
-- JSON escaping handles `"`, `\`, `\b`, `\f`, `\n`, `\r`, `\t` inline.
-- Numbers (`long`, `double`, `boolean`) are written as JSON literals, not
-  quoted strings — preserving their type in JSON consumers.
-- The `"entries"` array is opened lazily; the key is absent entirely when no
-  entries are written in a section.
+---
 
-#### Format-aware entry writing (acknowledged design compromise)
+## Wiring into existing Hazelcast diagnostics
 
-Plugins that need to emit structured data in JSON mode call `writer.getFormat()`
-and branch on the result. The STANDARD path is preserved byte-for-byte. The JSON
-path emits a structured object into the shared `"entries"` array.
+### Classes modified outside `diagnostics.json`
 
-The following call sites use format-aware branching to emit structured JSON:
+Four classes in the existing diagnostics infrastructure were modified to integrate
+the JSON subsystem. The changes are deliberately minimal.
 
-| Plugin | Call site | JSON key(s) |
-|--------|-----------|-------------|
-| `BuildInfoPlugin` | `writeBuildNumber` | `BuildNumber` as `long` (STANDARD: string, no comma grouping) |
-| `NetworkingImbalancePlugin` | `writePercentageEntry` | percentage keys as `double` (STANDARD: `"X,XXX.XX %"` string) |
-| `OperationHeartbeatPlugin` | `run` | JSON uses `"members":[{"address":...}]` array; STANDARD uses `"member<addr>"` section key and also appends `lastHeartbeat(date-time)` / `now(date-time)` |
-| `MemberHeartbeatPlugin` | `render` | Same as `OperationHeartbeatPlugin` above |
-| `SlowOperationPlugin.renderStackTrace` | stack trace lines | `"line"` |
-| `SlowOperationPlugin.renderInvocations` | per invocation (array item) | `"startedAt"`, `"duration(ms)"`, `"operationDetails"` (STANDARD also writes `started(date-time)`) |
-| `SystemLogPlugin.render(LifecycleEvent)` | lifecycle state | `"state"` |
-| `SystemLogPlugin.render(Version)` | cluster version | `"version"` |
-| `SystemLogPlugin.render(MembershipEvent)` | member list entries | `"address"`, `"isThis"`, `"isMaster"` |
-| `SystemLogPlugin.render(ConnectionEvent)` | remote address | `"remoteAddress"` |
-| `SystemLogPlugin.renderConnectionClose` | close cause | `"exceptionClass"`, `"message"` |
-| `MemberHazelcastInstanceInfoPlugin.run` | member addresses | `"address"` |
-| `PendingInvocationsPlugin.renderInvocations` | pending ops | `"operation"`, `"count"` |
-| `EventQueuePlugin.renderSamples` | event type samples | `"serviceType"` + `"dataStructureName"` + `"eventType"` for known types; `"eventType"` (class name) for unknown; `"sampleCount"`, `"percentage"` |
-| `InvocationSamplePlugin.writePending` | slow pending invocations | `"operation"` (descriptor string), `"duration"` (ms), `"unit"` (`"ms"`); overflow as `{"text":"..."}` |
-| `InvocationSamplePlugin.writeHistory` / `writeSlowHistory` | `"History"` / `"SlowHistory"` | each entry: `{"operation": descriptor, "samples": count}` |
-| `OperationThreadSamplerPlugin.write` | thread samples | `"operation"`, `"samples"`, `"percentage"` |
-| `OverloadedConnectionsPlugin.renderJson` | connection array items | `"from"`, `"to"`, `"packetCount"`/`"urgentPacketCount"`, `"sampleCount"`, nested `"samples"` section |
-| `OverloadedConnectionsPlugin.renderSamples` | connection type samples | `"connectionType"`, `"sampleCount"`, `"percentage"` |
+#### `DiagnosticsLogFormat` (new file, `diagnostics` package)
 
-**CloseCause stack trace lines:**
-Stack frames within a `"CloseCause"` section are written via `writeEntry` and
-therefore appear as `{"text":"<frame>"}` objects in the `entries` array. The
-first entry (exception class + message) is a structured object with
-`exceptionClass` and `message` keys.
+New enum with two values: `STANDARD` (unchanged default) and `JSON`.
+Adding a new enum rather than a boolean avoids polluting `DiagnosticsConfig`
+with a flag whose name would need to change if a third format were ever added.
 
-**Exception — `SystemLogPlugin.render(MigrationState)`:**
-`startTime` is written with `writeKeyValueEntryAsDateTime` unconditionally in
-both formats, producing a `"dd-MM-yyyy HH:mm:ss"` string. No epoch value is
-available from `MigrationState.getStartTime()`.
+#### `DiagnosticsConfig` (`diagnostics` package)
+
+Added one field: `DiagnosticsLogFormat logFormat` with default `STANDARD`.
+Getter, setter, `equals`/`hashCode`, `toString`, and `IdentifiedDataSerializable`
+serialization were updated accordingly. This allows the setting to be propagated
+in a clustered environment where config is distributed.
+
+#### `Diagnostics` (`diagnostics` package)
+
+Three additions:
+
+1. **`registerJsonPlugin(JsonDiagnosticsPlugin)`** — delegates to
+   `JsonDiagnosticsLog.registerPlugin()` when the active log is a
+   `JsonDiagnosticsLog`; no-op otherwise.  Separating registration from
+   scheduler start means all plugins can be constructed and wired up before the
+   first run fires.
+
+2. **`startJsonLog()`** — calls `JsonDiagnosticsLog.start()` after all plugins
+   have been registered.  The split avoids the race condition that existed in an
+   earlier draft where `start()` was called inside the constructor before any
+   plugins were added.
+
+3. **`getPlugin(Class<P>)` subtype scan** — the existing `pluginsMap` keyed by
+   exact class means `getPlugin(StoreLatencyPlugin.class)` would return `null`
+   when a `JsonStoreLatencyPlugin` (a subclass) was registered.  A fallback loop
+   over `pluginsMap.values()` using `isInstance` was added so callers using the
+   base class key still find the right instance.
+
+4. **`JsonDiagnosticsLog` instantiation** — in the factory method that creates
+   the `DiagnosticsLog`, `logFormat == JSON` now constructs a `JsonDiagnosticsLog`
+   instead of the standard `DiagnosticsLogFile`.
+
+#### `DefaultNodeExtension` (`instance.impl` package)
+
+`registerPlugins(Diagnostics)` now checks the configured format at the start:
+if `JSON`, it calls `registerJsonPlugins()` (a new private method) and returns
+early, bypassing all the STANDARD plugin registrations.
+
+`registerJsonPlugins()` constructs and registers every `Json*Plugin` via
+`diagnostics.registerJsonPlugin()`, then registers `JsonStoreLatencyPlugin` via
+the standard `diagnostics.register()` (so it is discoverable by store wrappers),
+and finally calls `diagnostics.startJsonLog()` to begin scheduling.
+
+---
+
+### Rationale for a separate `diagnostics.json` package
+
+The JSON output could have been implemented by modifying the existing
+`DiagnosticsPlugin` classes and the `DiagnosticsLogWriter` interface. This
+approach was explicitly rejected for the following reasons:
+
+**Minimum footprint in shared code.** The standard diagnostics system is used
+in production by every Hazelcast deployment.  Modifying the per-plugin `run()`
+methods — even carefully — risks regressions in the STANDARD output that are
+difficult to detect until production. A separate parallel hierarchy means the
+standard code path is structurally untouched: the compiler enforces this.
+
+**Future direction: removing STANDARD format client-side.** The long-term intent
+is to standardise on JSON and move STANDARD rendering to a client-side converter
+(i.e. a tool that ingests NDJSON and pretty-prints the familiar indented-text
+format). When that conversion exists, the STANDARD `DiagnosticsPlugin` classes
+and the STANDARD writer can be removed wholesale without touching the JSON path.
+The separate package makes that future cleanup a straight deletion rather than
+a surgical extraction from shared code.
+
+**Clean schema ownership.** Each `Json*Plugin` owns its output schema end-to-end
+without inheriting any of the quirks of the STANDARD format (comma-grouped
+numbers, mixed-type `entries` arrays, `date-time` string duplication of epoch).
+The JSON schema documented in this file is the sole specification; there is no
+ambiguity about which writer quirk applies.
+
+**Testability.** The `JsonEntryWriter` is a pure synchronous in-memory writer
+that can be constructed with a `StringWriter` in any unit test.  JSON plugins
+can be tested in isolation without a running `HazelcastInstance` for most cases,
+and schema validation (via `DiagnosticsSchemaValidator`) is applied to every
+plugin in its own test class.
 
 ---
 
@@ -1269,7 +1313,6 @@ scrape_configs:
           expressions:
             epoch:   epoch
             name:    name
-            time:    time
 
       # 2. Use epoch (Unix ms) as the Loki timestamp — precise and timezone-free
       - timestamp:
@@ -1279,10 +1322,6 @@ scrape_configs:
       # 3. Promote 'name' to a stream label for efficient log stream selection
       - labels:
           name:
-
-      # 4. Drop the redundant 'time' field from the log line (optional)
-      - labeldrop:
-          - time
 ```
 
 With Grafana Alloy replace the `scrape_configs` block with the equivalent
@@ -1298,7 +1337,7 @@ loki.process "diag" {
   forward_to = [loki.write.default.receiver]
 
   stage.json {
-    expressions = {epoch = "epoch", name = "name"}
+    expressions = {epoch = "", name = ""}
   }
   stage.timestamp {
     source = "epoch"
@@ -1687,21 +1726,21 @@ jq 'select(.name == "PendingInvocations") |
 # Invocations plugin — slow pending ops (duration in ms)
 jq 'select(.name == "Invocations") |
     .epoch as $e |
-    .content.Pending // [] |
-    sort_by(-.durationMs) |
-    .[] | {epoch: $e, duration_ms: .durationMs, class: .Invocation.class}' diag.log
+    (.content.Pending.entries // []) |
+    sort_by(-.duration) |
+    .[] | {epoch: $e, operation, duration_ms: .duration}' diag.log
 
 # SlowHistory — which operation types have accumulated slow-invocation samples?
 jq 'select(.name == "Invocations") |
-    {epoch, slow_history: (.content.SlowHistory // [])}' diag.log \
-  | jq 'select(.slow_history | length > 0)'
+    select((.content.SlowHistory.entries // []) | length > 0) |
+    {epoch, slow_history: .content.SlowHistory.entries}' diag.log
 
-# History — flatten to {epoch, class, samples} rows, sorted by samples desc
+# History — flatten to {epoch, operation, samples} rows, sorted by samples desc
 jq 'select(.name == "Invocations") |
     .epoch as $e |
-    .content.History // [] |
-    .[] | to_entries[] |
-    {epoch: $e, class: .key, samples: .value}' diag.log \
+    (.content.History.entries // []) |
+    .[] |
+    {epoch: $e, operation, samples}' diag.log \
   | jq -s 'sort_by(-.samples)'
 
 # InvocationProfiler — average and max latency per operation type
@@ -1732,20 +1771,20 @@ jq 'select(.name == "OperationHeartbeat") |
 # Timeline of heartbeat deviations for a specific member
 jq --arg addr "192.168.1.11:5701" '
     select(.name == "OperationHeartbeat" or .name == "MemberHeartbeats") |
-    .epoch as $e |
+    .epoch as $e | .name as $plugin |
     .content.members[] |
     select(.address == $addr) |
-    {epoch: $e, plugin: "OperationHeartbeat", deviation_pct: .["deviation(%)"], no_heartbeat_ms: .["noHeartbeat(ms)"]}' \
+    {epoch: $e, plugin: $plugin, deviation_pct: .["deviation(%)"], no_heartbeat_ms: .["noHeartbeat(ms)"]}' \
   diag.log
 
 # Worst single deviation across all heartbeat events
-jq '(select(.name == "OperationHeartbeat") // select(.name == "MemberHeartbeats")) |
+jq 'select(.name == "OperationHeartbeat" or .name == "MemberHeartbeats") |
     .content.members[].["deviation(%)"]' diag.log \
   | jq -s 'max'
 
 # Connection events — member connections opening and closing
 jq 'select(.name == "ConnectionAdded" or .name == "ConnectionRemoved") |
-    {epoch, event: .name, connection: .content.entries[0].connection,
+    {epoch, event: .name, remoteAddress: .content.entries[0].remoteAddress,
      type: .content.type, alive: .content.isAlive,
      reason: .content.closeReason}' diag.log
 
@@ -1753,7 +1792,7 @@ jq 'select(.name == "ConnectionAdded" or .name == "ConnectionRemoved") |
 jq 'select(.name == "ConnectionRemoved") |
     select(.content.CloseCause != null) |
     {epoch,
-     connection: .content.entries[0].connection,
+     remoteAddress: .content.entries[0].remoteAddress,
      reason: .content.closeReason,
      exception: .content.CloseCause.entries[0].exceptionClass,
      message:   .content.CloseCause.entries[0].message}' diag.log
@@ -1800,27 +1839,30 @@ jq 'select(.name == "Lifecycle") |
 ### Map and cache store latency — MapLoader / MapStore performance
 
 ```bash
-# All MapService store-latency events
-jq 'select(.name == "MapService")' diag.log
+# All StoreLatency events
+jq 'select(.name == "StoreLatency")' diag.log
 
-# Average and max load latency per map, sorted by worst average
-jq 'select(.name == "MapService") |
-    .content | to_entries[] |
+# Which services have latency data?
+jq 'select(.name == "StoreLatency") | .content.service' diag.log | sort | uniq -c
+
+# Average and max load latency per map (MapService), sorted by worst average
+jq 'select(.name == "StoreLatency" and .content.service == "MapService") |
+    .content | del(.service) | to_entries[] |
     .key as $map |
     (.value.load // empty) |
     {map: $map, count, avg_us: .["avg(us)"], max_us: .["max(us)"]}' \
   diag.log \
   | jq -s 'sort_by(-.avg_us)[]'
 
-# Any load operation taking > 1 ms on average (1000 us)
-jq 'select(.name == "MapService") |
-    .content | to_entries[] |
+# Any MapService load operation averaging > 1 ms (1000 us)
+jq 'select(.name == "StoreLatency" and .content.service == "MapService") |
+    .content | del(.service) | to_entries[] |
     select(.value.load["avg(us)"] > 1000) |
     {map: .key, avg_us: .value.load["avg(us)"], max_us: .value.load["max(us)"]}' diag.log
 
-# CacheService — same pattern
-jq 'select(.name == "CacheService") |
-    .content | to_entries[] |
+# CacheService — same pattern, different service filter
+jq 'select(.name == "StoreLatency" and .content.service == "CacheService") |
+    .content | del(.service) | to_entries[] |
     .key as $cache |
     (.value.load // empty) |
     {cache: $cache, count, avg_us: .["avg(us)"], max_us: .["max(us)"]}' diag.log

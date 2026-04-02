@@ -84,32 +84,35 @@ public class JsonMetricsPluginTest extends HazelcastTestSupport {
     }
 
     @Test
-    public void testRun_producesMultipleLines() {
+    public void testRun_producesExactlyOneLine() {
         plugin.run(entryWriter);
-        String output = sw.toString();
+        String output = sw.toString().trim();
         String[] lines = output.split("\n");
-        assertTrue("Expected multiple metric lines, got: " + lines.length, lines.length > 1);
+        assertEquals("Expected exactly one Metric line per collection cycle", 1, lines.length);
     }
 
     @Test
-    public void testRun_allLinesSchemaValid() {
+    public void testRun_lineIsSchemaValid() {
         plugin.run(entryWriter);
-        for (String line : sw.toString().split("\n")) {
-            if (!line.isEmpty()) {
-                DiagnosticsSchemaValidator.get().assertValid(line);
-            }
-        }
+        String line = sw.toString().trim();
+        assertFalse("Expected non-empty output", line.isEmpty());
+        DiagnosticsSchemaValidator.get().assertValid(line);
     }
 
     @Test
-    public void testRun_allLinesHaveNameMetric() throws Exception {
+    public void testRun_lineHasNameMetric() throws Exception {
         plugin.run(entryWriter);
-        for (String line : sw.toString().split("\n")) {
-            if (!line.isEmpty()) {
-                JsonNode root = MAPPER.readTree(line);
-                assertEquals("Metric", root.get("name").asText());
-            }
-        }
+        String line = sw.toString().trim();
+        JsonNode root = MAPPER.readTree(line);
+        assertEquals("Metric", root.get("name").asText());
+    }
+
+    @Test
+    public void testRun_singleLineContainsMultipleMetrics() throws Exception {
+        plugin.run(entryWriter);
+        String line = sw.toString().trim();
+        JsonNode content = MAPPER.readTree(line).get("content");
+        assertTrue("Single Metric line must contain more than one metric field", content.size() > 1);
     }
 
     @Test
@@ -117,41 +120,18 @@ public class JsonMetricsPluginTest extends HazelcastTestSupport {
         metricsRegistry.registerStaticProbe(this, "testLongMetric", MANDATORY,
                 (LongProbeFunction<JsonMetricsPluginTest>) source -> 42L);
         plugin.run(entryWriter);
-        boolean found = false;
-        for (String line : sw.toString().split("\n")) {
-            if (!line.isEmpty()) {
-                JsonNode content = MAPPER.readTree(line).get("content");
-                if (content.has("[metric=testLongMetric]")) {
-                    assertEquals(42L, content.get("[metric=testLongMetric]").asLong());
-                    found = true;
-                }
-            }
-        }
-        assertTrue("Expected testLongMetric in output", found);
+        JsonNode content = MAPPER.readTree(sw.toString().trim()).get("content");
+        assertTrue("Expected testLongMetric in content", content.has("[metric=testLongMetric]"));
+        assertEquals(42L, content.get("[metric=testLongMetric]").asLong());
     }
 
     @Test
     public void testRun_excludedMetricNotPresent() throws Exception {
         metricsRegistry.registerStaticMetrics(new ExcludedProbeSource(), "excluded");
         plugin.run(entryWriter);
-        for (String line : sw.toString().split("\n")) {
-            if (!line.isEmpty()) {
-                JsonNode content = MAPPER.readTree(line).get("content");
-                assertFalse("Excluded metric must not appear",
-                        content.has("[unit=count,metric=excluded.excludedMetric]"));
-            }
-        }
-    }
-
-    @Test
-    public void testRun_eachLineHasOneMetric() throws Exception {
-        plugin.run(entryWriter);
-        for (String line : sw.toString().split("\n")) {
-            if (!line.isEmpty()) {
-                JsonNode content = MAPPER.readTree(line).get("content");
-                assertEquals("Each Metric line must have exactly one field", 1, content.size());
-            }
-        }
+        JsonNode content = MAPPER.readTree(sw.toString().trim()).get("content");
+        assertFalse("Excluded metric must not appear",
+                content.has("[unit=count,metric=excluded.excludedMetric]"));
     }
 
     private static final class ExcludedProbeSource {
