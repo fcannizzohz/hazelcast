@@ -51,6 +51,8 @@ public class JsonMetricsPlugin extends JsonDiagnosticsPlugin {
     public static final HazelcastProperty PERIOD_SECONDS
             = new HazelcastProperty("hazelcast.diagnostics.metrics.period.seconds", 60, SECONDS);
 
+    private static final String ENTRY_NAME = "Metric";
+
     private final MetricsRegistry metricsRegistry;
     private final JsonMetricsCollector collector = new JsonMetricsCollector();
     private long periodMillis;
@@ -81,8 +83,6 @@ public class JsonMetricsPlugin extends JsonDiagnosticsPlugin {
     // ------------------------------------------------------------------ collector
 
     private static final class JsonMetricsCollector implements MetricsCollector {
-
-        private static final String ENTRY_NAME = "Metric";
 
         private JsonEntryWriter writer;
 
