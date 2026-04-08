@@ -42,7 +42,6 @@ import static com.hazelcast.internal.metrics.ProbeLevel.MANDATORY;
 import static com.hazelcast.test.Accessors.getNodeEngineImpl;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(HazelcastParallelClassRunner.class)
@@ -112,8 +111,8 @@ public class JsonMetricsPluginTest extends HazelcastTestSupport {
     public void testRun_singleLineContainsMultipleMetrics() throws Exception {
         plugin.run(entryWriter);
         String line = sw.toString().trim();
-        JsonNode metrics = MAPPER.readTree(line).get("content").get("metrics");
-        assertTrue("Single Metric line must contain more than one metric object", metrics.size() > 1);
+        JsonNode content = MAPPER.readTree(line).get("content");
+        assertTrue("Single Metric line must contain more than one metric field", content.size() > 1);
     }
 
     @Test
@@ -121,28 +120,18 @@ public class JsonMetricsPluginTest extends HazelcastTestSupport {
         metricsRegistry.registerStaticProbe(this, "testLongMetric", MANDATORY,
                 (LongProbeFunction<JsonMetricsPluginTest>) source -> 42L);
         plugin.run(entryWriter);
-        JsonNode metrics = MAPPER.readTree(sw.toString().trim()).get("content").get("metrics");
-        JsonNode found = null;
-        for (JsonNode m : metrics) {
-            if ("testLongMetric".equals(m.path("metric").asText())) {
-                found = m;
-                break;
-            }
-        }
-        assertNotNull("Expected testLongMetric in metrics array", found);
-        assertEquals(42L, found.get("value").asLong());
+        JsonNode content = MAPPER.readTree(sw.toString().trim()).get("content");
+        assertTrue("Expected testLongMetric key in content", content.has("testLongMetric"));
+        assertEquals(42L, content.get("testLongMetric").asLong());
     }
 
     @Test
     public void testRun_excludedMetricNotPresent() throws Exception {
         metricsRegistry.registerStaticMetrics(new ExcludedProbeSource(), "excluded");
         plugin.run(entryWriter);
-        JsonNode metrics = MAPPER.readTree(sw.toString().trim()).get("content").get("metrics");
-        for (JsonNode m : metrics) {
-            assertFalse("Excluded metric must not appear",
-                    "excludedMetric".equals(m.path("metric").asText())
-                    && "excluded".equals(m.path("prefix").asText()));
-        }
+        JsonNode content = MAPPER.readTree(sw.toString().trim()).get("content");
+        assertFalse("Excluded metric must not appear",
+                content.has("excluded.excludedMetric_count"));
     }
 
     private static final class ExcludedProbeSource {

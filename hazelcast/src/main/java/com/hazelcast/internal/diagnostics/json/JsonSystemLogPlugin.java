@@ -163,11 +163,7 @@ public class JsonSystemLogPlugin extends JsonDiagnosticsPlugin {
 
     private static void renderLifecycle(JsonEntryWriter writer, long epoch, LifecycleEvent event) {
         writer.startEntry(epoch, "Lifecycle");
-        writer.startArray("entries");
-        writer.startArrayItem();
         writer.writeString("state", event.getState().name());
-        writer.endArrayItem();
-        writer.endArray();
         writer.endEntry();
     }
 
@@ -237,12 +233,8 @@ public class JsonSystemLogPlugin extends JsonDiagnosticsPlugin {
         String name = event.added ? "ConnectionAdded" : "ConnectionRemoved";
         writer.startEntry(epoch, name);
         Connection connection = event.connection;
-        writer.startArray("entries");
-        writer.startArrayItem();
         Address remoteAddr = connection.getRemoteAddress();
         writer.writeString("remoteAddress", remoteAddr != null ? formatAddress(remoteAddr) : "null");
-        writer.endArrayItem();
-        writer.endArray();
         if (connection instanceof ServerConnection serverConnection) {
             writer.writeString("type", serverConnection.getConnectionType());
         }
@@ -277,11 +269,7 @@ public class JsonSystemLogPlugin extends JsonDiagnosticsPlugin {
 
     private static void renderClusterVersion(JsonEntryWriter writer, long epoch, Version version) {
         writer.startEntry(epoch, "ClusterVersionChanged");
-        writer.startArray("entries");
-        writer.startArrayItem();
         writer.writeString("version", version.toString());
-        writer.endArrayItem();
-        writer.endArray();
         writer.endEntry();
     }
 
