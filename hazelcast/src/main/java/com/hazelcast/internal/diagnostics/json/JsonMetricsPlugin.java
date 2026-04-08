@@ -32,12 +32,12 @@ import static java.util.concurrent.TimeUnit.SECONDS;
  * {@link MetricsRegistry}.
  *
  * <p>One {@code metricsRegistry.collect()} call produces exactly <b>one</b> NDJSON
- * line with {@code "name":"Metric"}.  All metrics are emitted as objects inside
- * a {@code "metrics"} array in {@code "content"}.  Each object carries
- * {@code "prefix"} (omitted when null), {@code "metric"}, {@code "unit"} (omitted
- * when null), and {@code "value"}.  This makes each line a self-contained snapshot
- * of the full metric state at that instant, which is the natural unit for
- * Loki stream ingestion and cross-metric jq correlation.
+ * line with {@code "name":"Metric"}.  All metrics are emitted as flat key-value
+ * pairs directly inside {@code "content"}.  Keys follow the pattern
+ * {@code [prefix.]metric[_unit]}, e.g. {@code "jvm.memory.heap.used_bytes"}.
+ * This makes each line a self-contained snapshot of the full metric state at
+ * that instant, which is the natural unit for Loki stream ingestion and
+ * cross-metric jq correlation, and produces the most compact output.
  *
  * <p>Uses the same property and period as the standard
  * {@link com.hazelcast.internal.diagnostics.MetricsPlugin}.
@@ -74,15 +74,28 @@ public class JsonMetricsPlugin extends JsonDiagnosticsPlugin {
     @Override
     public void run(JsonEntryWriter writer) {
         writer.startEntry(System.currentTimeMillis(), ENTRY_NAME);
-        writer.startArray("metrics");
         collector.writer = writer;
         metricsRegistry.collect(collector);
         collector.writer = null;
-        writer.endArray();
         writer.endEntry();
     }
 
-    // ------------------------------------------------------------------ unit helper
+    // ------------------------------------------------------------------ key / unit helpers
+
+    static String buildKey(MetricDescriptor descriptor) {
+        String prefix = descriptor.prefix();
+        String metric = descriptor.metric();
+        String unit = unitString(descriptor.unit());
+        StringBuilder key = new StringBuilder();
+        if (prefix != null && !prefix.isEmpty()) {
+            key.append(prefix).append('.');
+        }
+        key.append(metric);
+        if (unit != null) {
+            key.append('_').append(unit);
+        }
+        return key.toString();
+    }
 
     static String unitString(ProbeUnit unit) {
         if (unit == null) {
@@ -108,58 +121,27 @@ public class JsonMetricsPlugin extends JsonDiagnosticsPlugin {
 
         @Override
         public void collectLong(MetricDescriptor descriptor, long value) {
-            if (writer == null || !descriptor.isTargetIncluded(DIAGNOSTICS)) {
-                return;
+            if (writer != null && descriptor.isTargetIncluded(DIAGNOSTICS)) {
+                writer.writeLong(buildKey(descriptor), value);
             }
-            writer.startArrayItem();
-            writeDescriptorFields(descriptor);
-            writer.writeLong("value", value);
-            writer.endArrayItem();
         }
 
         @Override
         public void collectDouble(MetricDescriptor descriptor, double value) {
-            if (writer == null || !descriptor.isTargetIncluded(DIAGNOSTICS)) {
-                return;
+            if (writer != null && descriptor.isTargetIncluded(DIAGNOSTICS)) {
+                writer.writeDouble(buildKey(descriptor), value);
             }
-            writer.startArrayItem();
-            writeDescriptorFields(descriptor);
-            writer.writeDouble("value", value);
-            writer.endArrayItem();
         }
 
         @Override
         public void collectException(MetricDescriptor descriptor, Exception e) {
-            if (writer == null || !descriptor.isTargetIncluded(DIAGNOSTICS)) {
-                return;
-            }
-            writer.startArrayItem();
-            writeDescriptorFields(descriptor);
-            writer.writeString("exceptionClass", e.getClass().getName());
-            writer.writeString("message", e.getMessage());
-            writer.endArrayItem();
+            // exception metrics indicate a probe implementation bug; skip in flat map output
         }
 
         @Override
         public void collectNoValue(MetricDescriptor descriptor) {
-            if (writer == null || !descriptor.isTargetIncluded(DIAGNOSTICS)) {
-                return;
-            }
-            writer.startArrayItem();
-            writeDescriptorFields(descriptor);
-            writer.writeNull("value");
-            writer.endArrayItem();
-        }
-
-        private void writeDescriptorFields(MetricDescriptor descriptor) {
-            String prefix = descriptor.prefix();
-            if (prefix != null && !prefix.isEmpty()) {
-                writer.writeString("prefix", prefix);
-            }
-            writer.writeString("metric", descriptor.metric());
-            String unit = unitString(descriptor.unit());
-            if (unit != null) {
-                writer.writeString("unit", unit);
+            if (writer != null && descriptor.isTargetIncluded(DIAGNOSTICS)) {
+                writer.writeNull(buildKey(descriptor));
             }
         }
     }

@@ -231,39 +231,36 @@ interface SystemPropertiesContent {
 **`name`:** `"Metric"` | periodic | **one JSON line per collection cycle**
 
 One `metricsRegistry.collect()` call produces exactly **one** JSON line.
-All metrics from the collection cycle are flat key-value pairs directly inside
-`content` — no `"entries"` array, no wrapper objects.  This makes each line a
-self-contained snapshot and keeps Loki field extraction simple (each metric is
-directly accessible as a label after the `json` pipeline stage).
+All metrics are flat key-value pairs directly inside `content` — no wrapper
+arrays.  This keeps Loki field extraction simple (each metric is directly
+accessible as a label after the `json` pipeline stage) and minimises line size.
 
-**Metric key format:** `[prefix.]metric[discriminator=value][tag=value](unit)`
-where the discriminator/tag and unit parts are omitted when not present.
-Unit names are lower-cased (e.g. `bytes`, `ms`, `ns`, `percent`).
+**Metric key format:** `[prefix.]metric[_unit]`
+where `prefix` and `unit` are omitted when not present.
+Unit names: `bytes`, `ms`, `ns`, `pct`, `count`, `boolean`, `enum`, `us`.
 
 ```typescript
 interface MetricContent {
-  [parsedMetricKey: string]: number | null | MetricException;
-  // number        — collectLong / collectDouble
-  // null          — collectNoValue (metric registered but no value at collection time)
-  // MetricException — collectException (metric collection threw)
-  // key examples: "jvm.memory.heap.used(bytes)", "map.size[instance=myMap]", "os.cpu.load"
-}
-
-interface MetricException {
-  exceptionClass: string;
-  message:        string | null;
+  [key: string]: number | null;
+  // number — collectLong / collectDouble
+  // null   — collectNoValue (metric registered but no value at collection time)
+  // collectException metrics are skipped (probe implementation bug; check logs)
+  // key examples:
+  //   "jvm.memory.heap.used_bytes"   (prefix=jvm.memory, metric=heap.used, unit=BYTES)
+  //   "jvm.memory.heap.used_pct"     (prefix=jvm.memory, metric=heap.used, unit=PERCENT)
+  //   "os.cpu.load"                  (no unit)
+  //   "testLongMetric"               (no prefix, no unit)
 }
 ```
 
 ```json
-{"epoch":1710849600000,"name":"Metric","content":{"jvm.memory.heap.used(bytes)":1048576,"jvm.memory.heap.used(percent)":68.4,"os.cpu.load":null,"os.fd.count":{"exceptionClass":"java.lang.UnsupportedOperationException","message":"not supported on this platform"},"map.size[instance=myMap]":42}}
+{"epoch":1710849600000,"name":"Metric","content":{"jvm.memory.heap.used_bytes":1048576,"jvm.memory.heap.used_pct":68.4,"os.cpu.load":null,"operation.thread.completedOperationCount_count":2048}}
 ```
 
 > **STANDARD vs JSON difference:** STANDARD uses the raw `[metric=...,unit=...]`
-> bracket notation and emits one section per metric. JSON uses the parsed key
-> format and consolidates all metrics from one cycle into a single flat object.
-> STANDARD encodes exceptions as `"ClassName:message"` strings; JSON uses a
-> structured `{exceptionClass, message}` object.
+> bracket notation and emits one section per metric. JSON uses the parsed
+> `prefix.metric_unit` key format and consolidates all metrics from one cycle
+> into a single flat object, ~48 % smaller than a per-metric array structure.
 
 ---
 
@@ -367,7 +364,7 @@ interface StackLineEntry {
 
 interface InvocationEntry {
   startedAt:        number;           // epoch ms when invocation began
-  "duration(ms)":   number;
+  duration_ms:      number;
   operationDetails: string | null;    // null when no details available
 }
 ```
@@ -383,7 +380,7 @@ interface InvocationEntry {
       ]
     },
     "slowInvocations": [
-      { "startedAt": 1710849540000, "duration(ms)": 8200, "operationDetails": "PutOperation{...}" }
+      { "startedAt": 1710849540000, "duration_ms": 8200, "operationDetails": "PutOperation{...}" }
     ]
   }
 }}
@@ -407,16 +404,14 @@ flushed on each 1-second scheduler tick.
 
 ```typescript
 interface LifecycleContent {
-  entries: [LifecycleEntry];   // always exactly one entry per line
-}
-interface LifecycleEntry {
   state: "STARTING" | "STARTED" | "SHUTTING_DOWN" | "SHUTDOWN"
-       | "MERGING" | "MERGED" | "CLIENT_CONNECTED" | "CLIENT_DISCONNECTED";
+       | "MERGING" | "MERGED" | "CLIENT_CONNECTED" | "CLIENT_DISCONNECTED"
+       | "MERGE_FAILED" | "CLIENT_CHANGED_CLUSTER";
 }
 ```
 
 ```json
-{"epoch":1742385600000,"name":"Lifecycle","content":{"entries":[{"state":"STARTED"}]}}
+{"epoch":1742385600000,"name":"Lifecycle","content":{"state":"STARTED"}}
 ```
 
 #### MemberAdded / MemberRemoved
@@ -455,14 +450,11 @@ interface MemberEntry {
 
 ```typescript
 interface ConnectionContent {
-  entries: [ConnectionEntry];   // always exactly one entry per line
+  remoteAddress: string;        // remote endpoint address, e.g. "192.168.1.11:5701"; "null" when unavailable
   type?:        string;         // connection type (e.g. "MEMBER"); absent for non-ServerConnection
   isAlive:      boolean;
   closeReason?: string;         // present only for ConnectionRemoved
   CloseCause?:  CloseCauseSection;  // present only when connection has a cause exception
-}
-interface ConnectionEntry {
-  remoteAddress: string;   // remote endpoint address, e.g. "192.168.1.11:5701"; "null" when unavailable
 }
 interface CloseCauseSection {
   entries: (ExceptionEntry | TextEntry)[];
@@ -479,7 +471,7 @@ interface ExceptionEntry {
 ```
 
 ```json
-{"epoch":1710849600000,"name":"ConnectionRemoved","content":{"entries":[{"remoteAddress":"192.168.1.11:5701"}],"type":"MEMBER","isAlive":false,"closeReason":"Connection closed by peer","CloseCause":{"entries":[{"exceptionClass":"java.io.EOFException","message":"Connection reset"},{"text":"at java.io.DataInputStream.readFully(DataInputStream.java:197)"},{"text":"at com.hazelcast.internal.nio.IOUtil.readFully(IOUtil.java:88)"}]}}}
+{"epoch":1710849600000,"name":"ConnectionRemoved","content":{"remoteAddress":"192.168.1.11:5701","type":"MEMBER","isAlive":false,"closeReason":"Connection closed by peer","CloseCause":{"entries":[{"exceptionClass":"java.io.EOFException","message":"Connection reset"},{"text":"at java.io.DataInputStream.readFully(DataInputStream.java:197)"},{"text":"at com.hazelcast.internal.nio.IOUtil.readFully(IOUtil.java:88)"}]}}}
 ```
 
 #### ClusterVersionChanged
@@ -488,15 +480,12 @@ interface ExceptionEntry {
 
 ```typescript
 interface ClusterVersionContent {
-  entries: [VersionEntry];
-}
-interface VersionEntry {
   version: string;   // e.g. "5.6"
 }
 ```
 
 ```json
-{"epoch":1742385600000,"name":"ClusterVersionChanged","content":{"entries":[{"version":"5.6"}]}}
+{"epoch":1742385600000,"name":"ClusterVersionChanged","content":{"version":"5.6"}}
 ```
 
 #### MigrationState
@@ -505,11 +494,11 @@ interface VersionEntry {
 
 ```typescript
 interface MigrationStateContent {
-  startTime:            string;   // ISO-8601 UTC string, e.g. "2026-03-19T12:00:00Z"
-  plannedMigrations:    number;
-  completedMigrations:  number;
-  remainingMigrations:  number;
-  "totalElapsedTime(ms)": number;
+  startTime:           string;   // ISO-8601 UTC string, e.g. "2026-03-19T12:00:00Z"
+  plannedMigrations:   number;
+  completedMigrations: number;
+  remainingMigrations: number;
+  totalElapsedTime_ms: number;
 }
 ```
 
@@ -519,7 +508,7 @@ interface MigrationStateContent {
   "plannedMigrations": 271,
   "completedMigrations": 10,
   "remainingMigrations": 261,
-  "totalElapsedTime(ms)": 3200
+  "totalElapsedTime_ms": 3200
 }}
 ```
 
@@ -532,12 +521,12 @@ interface MigrationStateContent {
 
 ```typescript
 interface ReplicaMigrationContent {
-  source:              string;   // source member address, or "null"
-  destination:         string;
-  partitionId:         number;
-  replicaIndex:        number;
-  "elapsedTime(ms)":   number;
-  MigrationState:      MigrationStateContent;   // nested; same shape as standalone MigrationState
+  source:          string;   // source member address, or "null"
+  destination:     string;
+  partitionId:     number;
+  replicaIndex:    number;
+  elapsedTime_ms:  number;
+  MigrationState:  MigrationStateContent;   // nested; same shape as standalone MigrationState
 }
 ```
 
@@ -547,13 +536,13 @@ interface ReplicaMigrationContent {
   "destination": "192.168.1.11:5701",
   "partitionId": 42,
   "replicaIndex": 1,
-  "elapsedTime(ms)": 120,
+  "elapsedTime_ms": 120,
   "MigrationState": {
     "startTime": "2026-03-19T12:00:00Z",
     "plannedMigrations": 271,
     "completedMigrations": 11,
     "remainingMigrations": 260,
-    "totalElapsedTime(ms)": 3320
+    "totalElapsedTime_ms": 3320
   }
 }}
 ```
@@ -569,16 +558,16 @@ interface OperationHeartbeatContent {
   members: MemberHeartbeatEntry[];  // one entry per member exceeding the deviation threshold
 }
 interface MemberHeartbeatEntry {
-  address:             string;   // member address, e.g. "192.168.1.11:5701"
-  "deviation(%)":      number;   // float: percentage over expected interval
-  "noHeartbeat(ms)":   number;   // ms since last heartbeat
-  "lastHeartbeat(ms)": number;   // epoch ms of last heartbeat
-  "now(ms)":           number;   // epoch ms at check time
+  address:        string;   // member address, e.g. "192.168.1.11:5701"
+  deviation_pct:  number;   // float: percentage over expected interval
+  noHeartbeat_ms: number;   // ms since last heartbeat
+  lastHeartbeat_ms: number; // epoch ms of last heartbeat
+  now_ms:         number;   // epoch ms at check time
 }
 ```
 
 ```json
-{"epoch":1742385600000,"name":"OperationHeartbeat","content":{"members":[{"address":"192.168.1.11:5701","deviation(%)":66.66667,"noHeartbeat(ms)":25000,"lastHeartbeat(ms)":1710849575000,"now(ms)":1710849600000}]}}
+{"epoch":1742385600000,"name":"OperationHeartbeat","content":{"members":[{"address":"192.168.1.11:5701","deviation_pct":66.66667,"noHeartbeat_ms":25000,"lastHeartbeat_ms":1710849575000,"now_ms":1710849600000}]}}
 ```
 
 > **STANDARD vs JSON difference:** STANDARD uses `"member" + address` as the
@@ -595,20 +584,20 @@ grep '"name":"OperationHeartbeat"' diag.log | jq .
 
 # Deviation percentage for every member in every event
 grep '"name":"OperationHeartbeat"' diag.log \
-  | jq '.content.members[] | {address, deviation: .["deviation(%)"]}'
+  | jq '.content.members[] | {address, deviation_pct}'
 
 # Only members whose deviation exceeds 100 %
 grep '"name":"OperationHeartbeat"' diag.log \
-  | jq '.content.members[] | select(.["deviation(%)"] > 100) | {address, deviation: .["deviation(%)"]}'
+  | jq '.content.members[] | select(.deviation_pct > 100) | {address, deviation_pct}'
 
 # Worst deviation across all events (single number)
 grep '"name":"OperationHeartbeat"' diag.log \
-  | jq '.content.members[].["deviation(%)"]' \
+  | jq '.content.members[].deviation_pct' \
   | jq -s 'max'
 
 # Timeline: epoch + address + deviation for all events, sorted by epoch
 grep '"name":"OperationHeartbeat"' diag.log \
-  | jq -s '[.[] | .epoch as $e | .content.members[] | {epoch: $e, address, deviation: .["deviation(%)"]}] | sort_by(.epoch)[]'
+  | jq -s '[.[] | .epoch as $e | .content.members[] | {epoch: $e, address, deviation_pct}] | sort_by(.epoch)[]'
 ```
 
 ---
@@ -622,18 +611,18 @@ interface MemberHeartbeatsContent {
   members: MemberHeartbeatEntry[];  // one entry per member exceeding the deviation threshold
 }
 interface MemberHeartbeatEntry {
-  address:             string;
-  "deviation(%)":      number;
-  "noHeartbeat(ms)":   number;
-  "lastHeartbeat(ms)": number;
-  "now(ms)":           number;
+  address:          string;
+  deviation_pct:    number;
+  noHeartbeat_ms:   number;
+  lastHeartbeat_ms: number;
+  now_ms:           number;
 }
 ```
 
 Same shape as `OperationHeartbeat`; different data source and threshold.
 
 ```json
-{"epoch":1742385600000,"name":"MemberHeartbeats","content":{"members":[{"address":"192.168.1.11:5701","deviation(%)":120.0,"noHeartbeat(ms)":11000,"lastHeartbeat(ms)":1710849589000,"now(ms)":1710849600000}]}}
+{"epoch":1742385600000,"name":"MemberHeartbeats","content":{"members":[{"address":"192.168.1.11:5701","deviation_pct":120.0,"noHeartbeat_ms":11000,"lastHeartbeat_ms":1710849589000,"now_ms":1710849600000}]}}
 ```
 
 ---
@@ -651,18 +640,18 @@ interface ThreadsSection {
   [threadName: string]: ThreadEntry;   // key is NioThread.getName(), e.g. "hz.thread.io.in.0"
 }
 interface ThreadEntry {
-  "frames-percentage":          number;   // double 0.0–100.0 in JSON; formatted string in STANDARD
-  "frames":                     number;
-  "priority-frames-percentage": number;
-  "priority-frames":            number;
-  "bytes-percentage":           number;
-  "bytes":                      number;
-  "events-percentage":          number;
-  "events":                     number;
-  "handle-count-percentage":    number;
-  "handle-count":               number;
-  "tasks-percentage":           number;
-  "tasks":                      number;
+  frames_pct:        number;   // double 0.0–100.0 in JSON; formatted string in STANDARD
+  frames:            number;
+  priorityFrames_pct: number;
+  priorityFrames:    number;
+  bytes_pct:         number;
+  bytes:             number;
+  events_pct:        number;
+  events:            number;
+  handleCount_pct:   number;
+  handleCount:       number;
+  tasks_pct:         number;
+  tasks:             number;
 }
 ```
 
@@ -670,12 +659,12 @@ interface ThreadEntry {
 {"epoch":1742385600000,"name":"NetworkingImbalance","content":{
   "InputThreads": {
     "hz.thread.io.in.0": {
-      "frames-percentage": 60.0, "frames": 600,
-      "priority-frames-percentage": 50.0, "priority-frames": 50,
-      "bytes-percentage": 55.5, "bytes": 55500,
-      "events-percentage": 66.6, "events": 333,
-      "handle-count-percentage": 70.0, "handle-count": 140,
-      "tasks-percentage": 80.0, "tasks": 80
+      "frames_pct": 60.0, "frames": 600,
+      "priorityFrames_pct": 50.0, "priorityFrames": 50,
+      "bytes_pct": 55.5, "bytes": 55500,
+      "events_pct": 66.6, "events": 333,
+      "handleCount_pct": 70.0, "handleCount": 140,
+      "tasks_pct": 80.0, "tasks": 80
     }
   },
   "OutputThreads": {
@@ -743,15 +732,15 @@ interface DataStructureEntry {
 }
 interface MethodEntry {
   count:                   number;
-  "totalTime(us)":         number;
-  "avg(us)":               number;
-  "max(us)":               number;
+  totalTime_us:            number;
+  avg_us:                  number;
+  max_us:                  number;
   latency_distribution:    LatencyDistributionBucket[];   // only non-zero buckets
 }
 interface LatencyDistributionBucket {
-  "lo(us)": number;   // inclusive lower bound in microseconds
-  "hi(us)": number;   // inclusive upper bound in microseconds
-  count:    number;   // number of observations in this bucket
+  lo_us:  number;   // inclusive lower bound in microseconds
+  hi_us:  number;   // inclusive upper bound in microseconds
+  count:  number;   // number of observations in this bucket
 }
 ```
 
@@ -761,23 +750,23 @@ interface LatencyDistributionBucket {
   "employees": {
     "load": {
       "count": 100,
-      "totalTime(us)": 4200,
-      "avg(us)": 42,
-      "max(us)": 310,
+      "totalTime_us": 4200,
+      "avg_us": 42,
+      "max_us": 310,
       "latency_distribution": [
-        { "lo(us)": 0,   "hi(us)": 63,  "count": 60 },
-        { "lo(us)": 64,  "hi(us)": 127, "count": 35 },
-        { "lo(us)": 256, "hi(us)": 511, "count": 5  }
+        { "lo_us": 0,   "hi_us": 63,  "count": 60 },
+        { "lo_us": 64,  "hi_us": 127, "count": 35 },
+        { "lo_us": 256, "hi_us": 511, "count": 5  }
       ]
     },
     "store": {
       "count": 50,
-      "totalTime(us)": 8100,
-      "avg(us)": 162,
-      "max(us)": 450,
+      "totalTime_us": 8100,
+      "avg_us": 162,
+      "max_us": 450,
       "latency_distribution": [
-        { "lo(us)": 128, "hi(us)": 255, "count": 40 },
-        { "lo(us)": 256, "hi(us)": 511, "count": 10 }
+        { "lo_us": 128, "hi_us": 255, "count": 40 },
+        { "lo_us": 256, "hi_us": 511, "count": 10 }
       ]
     }
   }
@@ -799,25 +788,25 @@ interface OperationsProfilerContent {
 }
 interface LatencyEntry {
   count:                  number;
-  "totalTime(us)":        number;
-  "avg(us)":              number;
-  "max(us)":              number;
+  totalTime_us:           number;
+  avg_us:                 number;
+  max_us:                 number;
   latency_distribution:   LatencyDistributionBucket[];   // same format as StoreLatencyPlugin
 }
-// LatencyDistributionBucket: {lo(us), hi(us), count} — see StoreLatencyPlugin
+// LatencyDistributionBucket: {lo_us, hi_us, count} — see StoreLatencyPlugin
 ```
 
 ```json
 {"epoch":1742385600000,"name":"OperationsProfiler","content":{
   "com.hazelcast.map.impl.operation.PutOperation": {
     "count": 500,
-    "totalTime(us)": 12500,
-    "avg(us)": 25,
-    "max(us)": 310,
+    "totalTime_us": 12500,
+    "avg_us": 25,
+    "max_us": 310,
     "latency_distribution": [
-      { "lo(us)": 16,  "hi(us)": 31,  "count": 420 },
-      { "lo(us)": 32,  "hi(us)": 63,  "count": 75  },
-      { "lo(us)": 256, "hi(us)": 511, "count": 5   }
+      { "lo_us": 16,  "hi_us": 31,  "count": 420 },
+      { "lo_us": 32,  "hi_us": 63,  "count": 75  },
+      { "lo_us": 256, "hi_us": 511, "count": 5   }
     ]
   }
 }}
@@ -1673,7 +1662,7 @@ jq 'select(.name == "SlowOperations") |
     {epoch: $e,
      operation: .key,
      invocations: .value.invocations,
-     worst_duration_ms: (.value.slowInvocations // [] | map(.["duration(ms)"]) | max)}' diag.log
+     worst_duration_ms: (.value.slowInvocations.entries // [] | map(.duration_ms) | max)}' diag.log
 
 # Stack trace for a specific operation (first occurrence)
 jq 'select(.name == "SlowOperations") |
@@ -1685,18 +1674,18 @@ jq 'select(.name == "SlowOperations") |
 jq 'select(.name == "SlowOperations") |
     .content | to_entries[] |
     .key as $op |
-    .value.slowInvocations // [] |
+    .value.slowInvocations.entries // [] |
     .[] |
-    {operation: $op, startedAt, duration_ms: .["duration(ms)"], details: .operationDetails}' \
+    {operation: $op, startedAt, duration_ms, details: .operationDetails}' \
   diag.log \
   | jq -s 'sort_by(-.duration_ms) | .[0:10][]'
 
 # OperationsProfiler — operations sorted by average latency
 jq 'select(.name == "OperationsProfiler") |
     .content | to_entries |
-    sort_by(-.value["avg(us)"]) |
+    sort_by(-.value.avg_us) |
     .[] |
-    {operation: .key, count: .value.count, avg_us: .value["avg(us)"], max_us: .value["max(us)"]}' \
+    {operation: .key, count: .value.count, avg_us: .value.avg_us, max_us: .value.max_us}' \
   diag.log
 
 # What was running on operation threads at sample time?
@@ -1746,9 +1735,9 @@ jq 'select(.name == "Invocations") |
 # InvocationProfiler — average and max latency per operation type
 jq 'select(.name == "InvocationProfiler") |
     .content | to_entries |
-    sort_by(-.value["max(us)"]) |
+    sort_by(-.value.max_us) |
     .[] |
-    {operation: .key, count: .value.count, avg_us: .value["avg(us)"], max_us: .value["max(us)"]}' \
+    {operation: .key, count: .value.count, avg_us: .value.avg_us, max_us: .value.max_us}' \
   diag.log
 ```
 
@@ -1764,8 +1753,8 @@ jq 'select(.name == "OperationHeartbeat")' diag.log
 jq 'select(.name == "OperationHeartbeat") |
     .epoch as $e |
     .content.members[] |
-    select(.["deviation(%)"] > 100) |
-    {epoch: $e, address, deviation_pct: .["deviation(%)"], no_heartbeat_ms: .["noHeartbeat(ms)"]}' \
+    select(.deviation_pct > 100) |
+    {epoch: $e, address, deviation_pct, no_heartbeat_ms: .noHeartbeat_ms}' \
   diag.log
 
 # Timeline of heartbeat deviations for a specific member
@@ -1774,17 +1763,17 @@ jq --arg addr "192.168.1.11:5701" '
     .epoch as $e | .name as $plugin |
     .content.members[] |
     select(.address == $addr) |
-    {epoch: $e, plugin: $plugin, deviation_pct: .["deviation(%)"], no_heartbeat_ms: .["noHeartbeat(ms)"]}' \
+    {epoch: $e, plugin: $plugin, deviation_pct, no_heartbeat_ms: .noHeartbeat_ms}' \
   diag.log
 
 # Worst single deviation across all heartbeat events
 jq 'select(.name == "OperationHeartbeat" or .name == "MemberHeartbeats") |
-    .content.members[].["deviation(%)"]' diag.log \
+    .content.members[].deviation_pct' diag.log \
   | jq -s 'max'
 
 # Connection events — member connections opening and closing
 jq 'select(.name == "ConnectionAdded" or .name == "ConnectionRemoved") |
-    {epoch, event: .name, remoteAddress: .content.entries[0].remoteAddress,
+    {epoch, event: .name, remoteAddress: .content.remoteAddress,
      type: .content.type, alive: .content.isAlive,
      reason: .content.closeReason}' diag.log
 
@@ -1792,7 +1781,7 @@ jq 'select(.name == "ConnectionAdded" or .name == "ConnectionRemoved") |
 jq 'select(.name == "ConnectionRemoved") |
     select(.content.CloseCause != null) |
     {epoch,
-     remoteAddress: .content.entries[0].remoteAddress,
+     remoteAddress: .content.remoteAddress,
      reason: .content.closeReason,
      exception: .content.CloseCause.entries[0].exceptionClass,
      message:   .content.CloseCause.entries[0].message}' diag.log
@@ -1831,7 +1820,7 @@ jq 'select(.name == "HazelcastInstance") |
 
 # Node lifecycle transitions (STARTING → STARTED → SHUTTING_DOWN → SHUTDOWN)
 jq 'select(.name == "Lifecycle") |
-    {epoch, state: .content.entries[0].state}' diag.log
+    {epoch, state: .content.state}' diag.log
 ```
 
 ---
@@ -1850,22 +1839,22 @@ jq 'select(.name == "StoreLatency" and .content.service == "MapService") |
     .content | del(.service) | to_entries[] |
     .key as $map |
     (.value.load // empty) |
-    {map: $map, count, avg_us: .["avg(us)"], max_us: .["max(us)"]}' \
+    {map: $map, count, avg_us, max_us}' \
   diag.log \
   | jq -s 'sort_by(-.avg_us)[]'
 
 # Any MapService load operation averaging > 1 ms (1000 us)
 jq 'select(.name == "StoreLatency" and .content.service == "MapService") |
     .content | del(.service) | to_entries[] |
-    select(.value.load["avg(us)"] > 1000) |
-    {map: .key, avg_us: .value.load["avg(us)"], max_us: .value.load["max(us)"]}' diag.log
+    select(.value.load.avg_us > 1000) |
+    {map: .key, avg_us: .value.load.avg_us, max_us: .value.load.max_us}' diag.log
 
 # CacheService — same pattern, different service filter
 jq 'select(.name == "StoreLatency" and .content.service == "CacheService") |
     .content | del(.service) | to_entries[] |
     .key as $cache |
     (.value.load // empty) |
-    {cache: $cache, count, avg_us: .["avg(us)"], max_us: .["max(us)"]}' diag.log
+    {cache: $cache, count, avg_us, max_us}' diag.log
 ```
 
 ---
@@ -1893,12 +1882,12 @@ jq 'select(
     {epoch, name,
      summary: (
        if   .name == "SlowOperations"     then (.content | keys | join(", "))
-       elif .name == "OperationHeartbeat" then (.content.members | map(.address + " +" + (.["deviation(%)"] | tostring) + "%") | join(", "))
-       elif .name == "MemberHeartbeats"   then (.content.members | map(.address + " +" + (.["deviation(%)"] | tostring) + "%") | join(", "))
+       elif .name == "OperationHeartbeat" then (.content.members | map(.address + " +" + (.deviation_pct | tostring) + "%") | join(", "))
+       elif .name == "MemberHeartbeats"   then (.content.members | map(.address + " +" + (.deviation_pct | tostring) + "%") | join(", "))
        elif .name == "MemberAdded"        then ("+" + .content.member)
        elif .name == "MemberRemoved"      then ("-" + .content.member)
-       elif .name == "ConnectionRemoved"  then (.content.entries[0].connection + " reason=" + (.content.closeReason // "none"))
-       elif .name == "Lifecycle"          then .content.entries[0].state
+       elif .name == "ConnectionRemoved"  then (.content.remoteAddress + " reason=" + (.content.closeReason // "none"))
+       elif .name == "Lifecycle"          then .content.state
        else "" end
      )}' diag.log
 

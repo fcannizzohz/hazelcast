@@ -101,7 +101,7 @@ public class JsonSlowOperationPlugin extends JsonDiagnosticsPlugin {
             for (SlowOperationInvocationDTO inv : dto.invocations) {
                 writer.startArrayItem();
                 writer.writeLong("startedAt", inv.startedAt);
-                writer.writeLong("duration(ms)", inv.durationMs);
+                writer.writeLong("duration_ms", inv.durationMs);
                 writer.writeString("operationDetails", inv.operationDetails);
                 writer.endArrayItem();
             }

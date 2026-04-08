@@ -109,10 +109,7 @@ public class JsonSystemLogPluginTest extends HazelcastTestSupport {
         plugin.run(entryWriter);
         JsonNode root = MAPPER.readTree(sw.toString().trim());
         assertEquals("Lifecycle", root.get("name").asText());
-        JsonNode entries = root.get("content").get("entries");
-        assertNotNull(entries);
-        assertEquals(1, entries.size());
-        assertEquals("STARTED", entries.get(0).get("state").asText());
+        assertEquals("STARTED", root.get("content").get("state").asText());
     }
 
     @Test
@@ -216,7 +213,7 @@ public class JsonSystemLogPluginTest extends HazelcastTestSupport {
         plugin.run(entryWriter);
         JsonNode root = MAPPER.readTree(sw.toString().trim());
         assertEquals("ClusterVersionChanged", root.get("name").asText());
-        assertEquals("5.5", root.get("content").get("entries").get(0).get("version").asText());
+        assertEquals("5.5", root.get("content").get("version").asText());
     }
 
     // ------------------------------------------------------------------ connection
