@@ -105,7 +105,7 @@ public class JsonStoreLatencyPluginTest {
         JsonNode loadEntry = mapContent.get("load");
         assertNotNull("Method entry required", loadEntry);
         assertEquals(1, loadEntry.get("count").asInt());
-        assertTrue(loadEntry.get("totalTime(us)").asLong() >= 0);
+        assertTrue(loadEntry.get("totalTime_us").asLong() >= 0);
     }
 
     @Test

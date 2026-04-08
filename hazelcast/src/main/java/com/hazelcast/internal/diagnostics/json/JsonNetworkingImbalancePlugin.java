@@ -110,17 +110,17 @@ public class JsonNetworkingImbalancePlugin extends JsonDiagnosticsPlugin {
 
         for (NioThread t : threads) {
             writer.startObject(t.getName());
-            writer.writeDouble("frames-percentage", pct(t.framesTransceived(), totalFrames));
+            writer.writeDouble("frames_pct", pct(t.framesTransceived(), totalFrames));
             writer.writeLong("frames", t.framesTransceived());
-            writer.writeDouble("priority-frames-percentage", pct(t.priorityFramesTransceived(), totalPriorityFrames));
-            writer.writeLong("priority-frames", t.priorityFramesTransceived());
-            writer.writeDouble("bytes-percentage", pct(t.bytesTransceived(), totalBytes));
+            writer.writeDouble("priorityFrames_pct", pct(t.priorityFramesTransceived(), totalPriorityFrames));
+            writer.writeLong("priorityFrames", t.priorityFramesTransceived());
+            writer.writeDouble("bytes_pct", pct(t.bytesTransceived(), totalBytes));
             writer.writeLong("bytes", t.bytesTransceived());
-            writer.writeDouble("events-percentage", pct(t.eventCount(), totalEvents));
+            writer.writeDouble("events_pct", pct(t.eventCount(), totalEvents));
             writer.writeLong("events", t.eventCount());
-            writer.writeDouble("handle-count-percentage", pct(t.handleCount(), totalHandleCount));
-            writer.writeLong("handle-count", t.handleCount());
-            writer.writeDouble("tasks-percentage", pct(t.completedTaskCount(), totalTasks));
+            writer.writeDouble("handleCount_pct", pct(t.handleCount(), totalHandleCount));
+            writer.writeLong("handleCount", t.handleCount());
+            writer.writeDouble("tasks_pct", pct(t.completedTaskCount(), totalTasks));
             writer.writeLong("tasks", t.completedTaskCount());
             writer.endObject();
         }

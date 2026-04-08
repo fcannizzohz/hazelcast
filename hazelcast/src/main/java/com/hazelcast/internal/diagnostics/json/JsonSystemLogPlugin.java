@@ -207,7 +207,7 @@ public class JsonSystemLogPlugin extends JsonDiagnosticsPlugin {
         writer.writeLong("plannedMigrations", state.getPlannedMigrations());
         writer.writeLong("completedMigrations", state.getCompletedMigrations());
         writer.writeLong("remainingMigrations", state.getRemainingMigrations());
-        writer.writeLong("totalElapsedTime(ms)", state.getTotalElapsedTime());
+        writer.writeLong("totalElapsedTime_ms", state.getTotalElapsedTime());
         writer.endEntry();
     }
 
@@ -219,7 +219,7 @@ public class JsonSystemLogPlugin extends JsonDiagnosticsPlugin {
         writer.writeString("destination", event.getDestination().getAddress().toString());
         writer.writeLong("partitionId", event.getPartitionId());
         writer.writeLong("replicaIndex", event.getReplicaIndex());
-        writer.writeLong("elapsedTime(ms)", event.getElapsedTime());
+        writer.writeLong("elapsedTime_ms", event.getElapsedTime());
         // embed nested MigrationState
         MigrationState ms = event.getMigrationState();
         writer.startObject("MigrationState");
@@ -227,7 +227,7 @@ public class JsonSystemLogPlugin extends JsonDiagnosticsPlugin {
         writer.writeLong("plannedMigrations", ms.getPlannedMigrations());
         writer.writeLong("completedMigrations", ms.getCompletedMigrations());
         writer.writeLong("remainingMigrations", ms.getRemainingMigrations());
-        writer.writeLong("totalElapsedTime(ms)", ms.getTotalElapsedTime());
+        writer.writeLong("totalElapsedTime_ms", ms.getTotalElapsedTime());
         writer.endObject();
         writer.endEntry();
     }
