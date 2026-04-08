@@ -127,9 +127,9 @@ public class JsonStoreLatencyPlugin extends StoreLatencyPlugin implements JsonSc
                 }
                 writer.startObject(methodEntry.getKey());
                 writer.writeLong("count", dist.count());
-                writer.writeLong("totalTime(us)", dist.totalMicros());
-                writer.writeLong("avg(us)", dist.avgMicros());
-                writer.writeLong("max(us)", dist.maxMicros());
+                writer.writeLong("totalTime_us", dist.totalMicros());
+                writer.writeLong("avg_us", dist.avgMicros());
+                writer.writeLong("max_us", dist.maxMicros());
                 writer.startArray("latency_distribution");
                 for (int b = 0; b < dist.bucketCount(); b++) {
                     long value = dist.bucket(b);
@@ -137,8 +137,8 @@ public class JsonStoreLatencyPlugin extends StoreLatencyPlugin implements JsonSc
                         long lo = (b == 0) ? 0L : (1L << b);
                         long hi = (1L << (b + 1)) - 1;
                         writer.startArrayItem();
-                        writer.writeLong("lo(us)", lo);
-                        writer.writeLong("hi(us)", hi);
+                        writer.writeLong("lo_us", lo);
+                        writer.writeLong("hi_us", hi);
                         writer.writeLong("count", value);
                         writer.endArrayItem();
                     }

@@ -96,10 +96,10 @@ public class JsonOperationHeartbeatPlugin extends JsonDiagnosticsPlugin {
             double deviation = HUNDRED * ((double) (noHeartbeatMillis - expectedIntervalMillis)) / expectedIntervalMillis;
             writer.startArrayItem();
             writer.writeString("address", entry.getKey().toString());
-            writer.writeDouble("deviation(%)", deviation);
-            writer.writeLong("noHeartbeat(ms)", noHeartbeatMillis);
-            writer.writeLong("lastHeartbeat(ms)", lastHeartbeatMillis);
-            writer.writeLong("now(ms)", nowMillis);
+            writer.writeDouble("deviation_pct", deviation);
+            writer.writeLong("noHeartbeat_ms", noHeartbeatMillis);
+            writer.writeLong("lastHeartbeat_ms", lastHeartbeatMillis);
+            writer.writeLong("now_ms", nowMillis);
             writer.endArrayItem();
         }
         writer.endArray();

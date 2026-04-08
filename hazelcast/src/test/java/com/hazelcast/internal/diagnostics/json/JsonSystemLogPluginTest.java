@@ -182,7 +182,7 @@ public class JsonSystemLogPluginTest extends HazelcastTestSupport {
         assertEquals(100, content.get("plannedMigrations").asInt());
         assertEquals(50, content.get("completedMigrations").asInt());
         assertEquals(50, content.get("remainingMigrations").asInt());
-        assertEquals(1000, content.get("totalElapsedTime(ms)").asInt());
+        assertEquals(1000, content.get("totalElapsedTime_ms").asInt());
     }
 
     @Test

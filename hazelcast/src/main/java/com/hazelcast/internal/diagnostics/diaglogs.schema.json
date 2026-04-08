@@ -566,16 +566,16 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "lo(us)",
-        "hi(us)",
+        "lo_us",
+        "hi_us",
         "count"
       ],
       "properties": {
-        "lo(us)": {
+        "lo_us": {
           "type": "integer",
           "minimum": 0
         },
-        "hi(us)": {
+        "hi_us": {
           "type": "integer",
           "minimum": 0
         },
@@ -596,9 +596,9 @@
       "additionalProperties": false,
       "required": [
         "count",
-        "totalTime(us)",
-        "avg(us)",
-        "max(us)",
+        "totalTime_us",
+        "avg_us",
+        "max_us",
         "latency_distribution"
       ],
       "properties": {
@@ -606,15 +606,15 @@
           "type": "integer",
           "minimum": 0
         },
-        "totalTime(us)": {
+        "totalTime_us": {
           "type": "integer",
           "minimum": 0
         },
-        "avg(us)": {
+        "avg_us": {
           "type": "integer",
           "minimum": 0
         },
-        "max(us)": {
+        "max_us": {
           "type": "integer",
           "minimum": 0
         },
@@ -676,25 +676,54 @@
         }
       }
     },
+    "metricObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metric"
+      ],
+      "properties": {
+        "prefix": {
+          "type": "string",
+          "description": "Optional metric prefix, e.g. 'jvm.memory'. Omitted when the descriptor has no prefix."
+        },
+        "metric": {
+          "type": "string",
+          "description": "Metric name, e.g. 'heap.used'."
+        },
+        "unit": {
+          "type": "string",
+          "enum": ["bytes", "ms", "ns", "pct", "count", "boolean", "enum", "us"],
+          "description": "Measurement unit. Omitted when the descriptor has no unit."
+        },
+        "value": {
+          "description": "Metric value: a number, or null when no value was collected.",
+          "oneOf": [
+            {"type": "number"},
+            {"type": "null"}
+          ]
+        },
+        "exceptionClass": {
+          "type": "string",
+          "description": "Exception class name when collection failed. Present instead of value."
+        },
+        "message": {
+          "type": ["string", "null"],
+          "description": "Exception message. Present when exceptionClass is present."
+        }
+      }
+    },
     "metricContent": {
       "type": "object",
       "additionalProperties": false,
-      "patternProperties": {
-        "^.+$": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            },
-            {
-              "$ref": "#/$defs/metricExceptionValue"
-            }
-          ]
+      "required": ["metrics"],
+      "properties": {
+        "metrics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/metricObject"
+          },
+          "description": "Array of all metrics collected in this cycle."
         }
       }
     },
@@ -1122,7 +1151,7 @@
         "plannedMigrations",
         "completedMigrations",
         "remainingMigrations",
-        "totalElapsedTime(ms)"
+        "totalElapsedTime_ms"
       ],
       "properties": {
         "startTime": {
@@ -1140,7 +1169,7 @@
           "type": "integer",
           "minimum": 0
         },
-        "totalElapsedTime(ms)": {
+        "totalElapsedTime_ms": {
           "type": "integer",
           "minimum": 0
         }
@@ -1154,7 +1183,7 @@
         "destination",
         "partitionId",
         "replicaIndex",
-        "elapsedTime(ms)",
+        "elapsedTime_ms",
         "MigrationState"
       ],
       "properties": {
@@ -1172,7 +1201,7 @@
           "type": "integer",
           "minimum": 0
         },
-        "elapsedTime(ms)": {
+        "elapsedTime_ms": {
           "type": "integer",
           "minimum": 0
         },
@@ -1186,27 +1215,27 @@
       "additionalProperties": false,
       "required": [
         "address",
-        "deviation(%)",
-        "noHeartbeat(ms)",
-        "lastHeartbeat(ms)",
-        "now(ms)"
+        "deviation_pct",
+        "noHeartbeat_ms",
+        "lastHeartbeat_ms",
+        "now_ms"
       ],
       "properties": {
         "address": {
           "type": "string"
         },
-        "deviation(%)": {
+        "deviation_pct": {
           "type": "number"
         },
-        "noHeartbeat(ms)": {
+        "noHeartbeat_ms": {
           "type": "integer",
           "minimum": 0
         },
-        "lastHeartbeat(ms)": {
+        "lastHeartbeat_ms": {
           "type": "integer",
           "minimum": 0
         },
-        "now(ms)": {
+        "now_ms": {
           "type": "integer",
           "minimum": 0
         }
@@ -1232,56 +1261,56 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "frames-percentage",
+        "frames_pct",
         "frames",
-        "priority-frames-percentage",
-        "priority-frames",
-        "bytes-percentage",
+        "priorityFrames_pct",
+        "priorityFrames",
+        "bytes_pct",
         "bytes",
-        "events-percentage",
+        "events_pct",
         "events",
-        "handle-count-percentage",
-        "handle-count",
-        "tasks-percentage",
+        "handleCount_pct",
+        "handleCount",
+        "tasks_pct",
         "tasks"
       ],
       "properties": {
-        "frames-percentage": {
+        "frames_pct": {
           "type": "number"
         },
         "frames": {
           "type": "integer",
           "minimum": 0
         },
-        "priority-frames-percentage": {
+        "priorityFrames_pct": {
           "type": "number"
         },
-        "priority-frames": {
+        "priorityFrames": {
           "type": "integer",
           "minimum": 0
         },
-        "bytes-percentage": {
+        "bytes_pct": {
           "type": "number"
         },
         "bytes": {
           "type": "integer",
           "minimum": 0
         },
-        "events-percentage": {
+        "events_pct": {
           "type": "number"
         },
         "events": {
           "type": "integer",
           "minimum": 0
         },
-        "handle-count-percentage": {
+        "handleCount_pct": {
           "type": "number"
         },
-        "handle-count": {
+        "handleCount": {
           "type": "integer",
           "minimum": 0
         },
-        "tasks-percentage": {
+        "tasks_pct": {
           "type": "number"
         },
         "tasks": {
