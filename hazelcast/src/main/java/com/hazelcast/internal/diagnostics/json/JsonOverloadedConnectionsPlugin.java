@@ -71,6 +71,7 @@ public class JsonOverloadedConnectionsPlugin extends JsonDiagnosticsPlugin {
             "hazelcast.diagnostics.overloaded.connections.samples", 1000);
 
     private static final Queue<OutboundFrame> EMPTY_QUEUE = new LinkedList<>();
+    private static final double HUNDRED = 100.0;
 
     private final NodeEngineImpl nodeEngine;
     private final SerializationService serializationService;
@@ -158,7 +159,7 @@ public class JsonOverloadedConnectionsPlugin extends JsonDiagnosticsPlugin {
             for (String key : sample.occurrences.keySet()) {
                 long count = sample.occurrences.get(key);
                 if (count > 0) {
-                    double percentage = (double) count / sample.sampleCount * 100.0;
+                    double percentage = HUNDRED * count / sample.sampleCount;
                     writer.startArrayItem();
                     writer.writeString("connectionType", key);
                     writer.writeLong("sampleCount", count);

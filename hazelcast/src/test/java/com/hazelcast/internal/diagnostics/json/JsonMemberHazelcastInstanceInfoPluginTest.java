@@ -52,6 +52,7 @@ public class JsonMemberHazelcastInstanceInfoPluginTest extends HazelcastTestSupp
     @Before
     public void setUp() {
         Config config = new Config()
+                .setClusterName("test-cluster")
                 .setProperty("hazelcast.diagnostics.memberinfo.period.seconds", "1");
         hz = createHazelcastInstance(config);
         NodeEngineImpl nodeEngine = getNodeEngineImpl(hz);
@@ -104,5 +105,6 @@ public class JsonMemberHazelcastInstanceInfoPluginTest extends HazelcastTestSupp
         assertNotNull(content.get("clusterSize"));
         assertNotNull(content.get("Members"));
         assertTrue(content.get("clusterSize").asInt() > 0);
+        assertEquals("test-cluster", content.get("clusterName").asText());
     }
 }

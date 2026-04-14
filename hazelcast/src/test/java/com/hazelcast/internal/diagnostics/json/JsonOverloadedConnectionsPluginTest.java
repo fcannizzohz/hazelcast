@@ -39,8 +39,8 @@ import static org.junit.Assert.assertTrue;
  *
  * <p>In a single-node cluster with no overloaded connections, the plugin should
  * emit nothing because no connection queue exceeds the configured threshold.
- * The plugin's output-when-there-is-data path is exercised by the schema itself
- * which is validated in integration tests.
+ * Schema validation of the actual output path is covered by
+ * {@link JsonOverloadedConnectionsPluginSlowTest}, which requires real TCP networking.
  */
 @RunWith(HazelcastParallelClassRunner.class)
 @Category(QuickTest.class)

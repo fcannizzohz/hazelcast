@@ -71,6 +71,7 @@ public class JsonMemberHazelcastInstanceInfoPlugin extends JsonDiagnosticsPlugin
         NodeState state = nodeEngine.getNode().getState();
         writer.writeString("nodeState", state == null ? "null" : state.toString());
 
+        writer.writeString("clusterName", nodeEngine.getConfig().getClusterName());
         UUID clusterId = nodeEngine.getClusterService().getClusterId();
         writer.writeString("clusterId", clusterId != null ? clusterId.toString() : "null");
         writer.writeLong("clusterSize", nodeEngine.getClusterService().getSize());

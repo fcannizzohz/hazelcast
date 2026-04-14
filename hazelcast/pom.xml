@@ -490,6 +490,26 @@
                             </resources>
                         </configuration>
                     </execution>
+                    <execution>
+                        <id>copy-json-diagnostics-resources</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.outputDirectory}/com/hazelcast/internal/diagnostics/json</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>src/main/resources/com/hazelcast/internal/diagnostics/json</directory>
+                                    <filtering>false</filtering>
+                                    <includes>
+                                        <include>diaglogs.schema.json</include>
+                                        <include>README_json_spec.md</include>
+                                    </includes>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
                 </executions>
             </plugin>
 

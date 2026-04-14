@@ -62,6 +62,7 @@ public class JsonEventQueuePlugin extends JsonDiagnosticsPlugin {
             = new HazelcastProperty("hazelcast.diagnostics.event.queue.samples", 100);
 
     private static final float PERCENT_DIVISOR = 100.0f;
+    private static final double HUNDRED = 100.0;
 
     private final StripedExecutor eventExecutor;
     private final ItemCounter<String> occurrenceMap = new ItemCounter<>();
@@ -123,7 +124,7 @@ public class JsonEventQueuePlugin extends JsonDiagnosticsPlugin {
             if (count == 0) {
                 continue;
             }
-            double percentage = (double) count / actualSampleCount * 100.0;
+            double percentage = HUNDRED * count / actualSampleCount;
             writer.startArrayItem();
             writeEventKey(writer, key);
             writer.writeLong("sampleCount", count);
