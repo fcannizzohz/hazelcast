@@ -44,7 +44,7 @@ import java.util.Set;
  */
 public final class DiagnosticsSchemaValidator {
 
-    private static final String SCHEMA_RESOURCE = "diaglogs.schema.json";
+    private static final String SCHEMA_RESOURCE = "/com/hazelcast/internal/diagnostics/json/diaglogs.schema.json";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private static volatile DiagnosticsSchemaValidator instance;
