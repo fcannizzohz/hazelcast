@@ -78,7 +78,8 @@ public class JsonConfigPropertiesPluginTest {
     public void testRun_schemaValid() {
         JsonConfigPropertiesPlugin plugin = buildPlugin(new Properties(), Collections.emptyMap());
         plugin.run(entryWriter);
-        DiagnosticsSchemaValidator.get().assertValid(sw.toString().trim());
+        var errors = DiagnosticsSchemaValidator.get().validate(sw.toString().trim());
+        assertTrue("Schema violations: " + errors, errors.isEmpty());
     }
 
     @Test
@@ -135,6 +136,7 @@ public class JsonConfigPropertiesPluginTest {
         pluginProps.put("hazelcast.diagnostics.metric.level", "INFO");
         JsonConfigPropertiesPlugin plugin = buildPlugin(sysProps, pluginProps);
         plugin.run(entryWriter);
-        DiagnosticsSchemaValidator.get().assertValid(sw.toString().trim());
+        var errors = DiagnosticsSchemaValidator.get().validate(sw.toString().trim());
+        assertTrue("Schema violations: " + errors, errors.isEmpty());
     }
 }

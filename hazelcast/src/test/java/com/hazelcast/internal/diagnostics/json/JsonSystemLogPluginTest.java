@@ -100,7 +100,8 @@ public class JsonSystemLogPluginTest extends HazelcastTestSupport {
         String line = sw.toString().trim();
         assertNotNull(line);
         assertTrue("Must produce output", !line.isEmpty());
-        DiagnosticsSchemaValidator.get().assertValid(line);
+        var errors = DiagnosticsSchemaValidator.get().validate(line);
+        assertTrue("Schema violations: " + errors, errors.isEmpty());
     }
 
     @Test
@@ -118,7 +119,8 @@ public class JsonSystemLogPluginTest extends HazelcastTestSupport {
             sw.getBuffer().setLength(0);
             logQueue.add(new LifecycleEvent(state));
             plugin.run(entryWriter);
-            DiagnosticsSchemaValidator.get().assertValid(sw.toString().trim());
+            var errors = DiagnosticsSchemaValidator.get().validate(sw.toString().trim());
+            assertTrue("Schema violations: " + errors, errors.isEmpty());
         }
     }
 
@@ -129,7 +131,8 @@ public class JsonSystemLogPluginTest extends HazelcastTestSupport {
         MembershipEvent event = buildMembershipEvent(MembershipEvent.MEMBER_ADDED);
         logQueue.add(event);
         plugin.run(entryWriter);
-        DiagnosticsSchemaValidator.get().assertValid(sw.toString().trim());
+        var errors = DiagnosticsSchemaValidator.get().validate(sw.toString().trim());
+        assertTrue("Schema violations: " + errors, errors.isEmpty());
     }
 
     @Test
@@ -154,7 +157,8 @@ public class JsonSystemLogPluginTest extends HazelcastTestSupport {
         MembershipEvent event = buildMembershipEvent(MembershipEvent.MEMBER_REMOVED);
         logQueue.add(event);
         plugin.run(entryWriter);
-        DiagnosticsSchemaValidator.get().assertValid(sw.toString().trim());
+        var errors = DiagnosticsSchemaValidator.get().validate(sw.toString().trim());
+        assertTrue("Schema violations: " + errors, errors.isEmpty());
     }
 
     // ------------------------------------------------------------------ migration
@@ -164,7 +168,8 @@ public class JsonSystemLogPluginTest extends HazelcastTestSupport {
         MigrationState state = buildMigrationState();
         logQueue.add(state);
         plugin.run(entryWriter);
-        DiagnosticsSchemaValidator.get().assertValid(sw.toString().trim());
+        var errors = DiagnosticsSchemaValidator.get().validate(sw.toString().trim());
+        assertTrue("Schema violations: " + errors, errors.isEmpty());
     }
 
     @Test
@@ -187,7 +192,8 @@ public class JsonSystemLogPluginTest extends HazelcastTestSupport {
         ReplicaMigrationEvent event = buildReplicaMigration(true);
         logQueue.add(event);
         plugin.run(entryWriter);
-        DiagnosticsSchemaValidator.get().assertValid(sw.toString().trim());
+        var errors = DiagnosticsSchemaValidator.get().validate(sw.toString().trim());
+        assertTrue("Schema violations: " + errors, errors.isEmpty());
     }
 
     @Test
@@ -195,7 +201,8 @@ public class JsonSystemLogPluginTest extends HazelcastTestSupport {
         ReplicaMigrationEvent event = buildReplicaMigration(false);
         logQueue.add(event);
         plugin.run(entryWriter);
-        DiagnosticsSchemaValidator.get().assertValid(sw.toString().trim());
+        var errors = DiagnosticsSchemaValidator.get().validate(sw.toString().trim());
+        assertTrue("Schema violations: " + errors, errors.isEmpty());
     }
 
     // ------------------------------------------------------------------ cluster version
@@ -204,7 +211,8 @@ public class JsonSystemLogPluginTest extends HazelcastTestSupport {
     public void testClusterVersionChanged_schemaValid() {
         logQueue.add(Version.of(5, 5));
         plugin.run(entryWriter);
-        DiagnosticsSchemaValidator.get().assertValid(sw.toString().trim());
+        var errors = DiagnosticsSchemaValidator.get().validate(sw.toString().trim());
+        assertTrue("Schema violations: " + errors, errors.isEmpty());
     }
 
     @Test
@@ -223,7 +231,8 @@ public class JsonSystemLogPluginTest extends HazelcastTestSupport {
         Connection conn = mockConnection(true, null, null);
         logQueue.add(new JsonSystemLogPlugin.ConnectionEvent(true, conn));
         plugin.run(entryWriter);
-        DiagnosticsSchemaValidator.get().assertValid(sw.toString().trim());
+        var errors = DiagnosticsSchemaValidator.get().validate(sw.toString().trim());
+        assertTrue("Schema violations: " + errors, errors.isEmpty());
     }
 
     @Test
@@ -231,7 +240,8 @@ public class JsonSystemLogPluginTest extends HazelcastTestSupport {
         Connection conn = mockConnection(false, "timeout", null);
         logQueue.add(new JsonSystemLogPlugin.ConnectionEvent(false, conn));
         plugin.run(entryWriter);
-        DiagnosticsSchemaValidator.get().assertValid(sw.toString().trim());
+        var errors = DiagnosticsSchemaValidator.get().validate(sw.toString().trim());
+        assertTrue("Schema violations: " + errors, errors.isEmpty());
     }
 
     @Test
@@ -240,7 +250,8 @@ public class JsonSystemLogPluginTest extends HazelcastTestSupport {
         Connection conn = mockConnection(false, null, cause);
         logQueue.add(new JsonSystemLogPlugin.ConnectionEvent(false, conn));
         plugin.run(entryWriter);
-        DiagnosticsSchemaValidator.get().assertValid(sw.toString().trim());
+        var errors = DiagnosticsSchemaValidator.get().validate(sw.toString().trim());
+        assertTrue("Schema violations: " + errors, errors.isEmpty());
     }
 
     // ------------------------------------------------------------------ queue drain
@@ -253,7 +264,8 @@ public class JsonSystemLogPluginTest extends HazelcastTestSupport {
         String[] lines = sw.toString().split("\n");
         assertEquals(2, lines.length);
         for (String line : lines) {
-            DiagnosticsSchemaValidator.get().assertValid(line);
+            var errors = DiagnosticsSchemaValidator.get().validate(line);
+            assertTrue("Schema violations: " + errors, errors.isEmpty());
         }
     }
 

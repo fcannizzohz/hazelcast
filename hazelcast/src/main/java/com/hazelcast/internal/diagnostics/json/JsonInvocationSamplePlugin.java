@@ -114,8 +114,7 @@ public class JsonInvocationSamplePlugin extends JsonDiagnosticsPlugin {
                 }
                 writer.startArrayItem();
                 writer.writeString("operation", operationDesc);
-                writer.writeLong("duration", durationMs);
-                writer.writeString("unit", "ms");
+                writer.writeLong("duration_ms", durationMs);
                 writer.endArrayItem();
             } else if (!maxPrinted) {
                 maxPrinted = true;

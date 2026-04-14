@@ -691,7 +691,7 @@
       "additionalProperties": false,
       "required": [
         "sampleCount",
-        "percentage"
+        "percentage_pc"
       ],
       "properties": {
         "serviceType": {
@@ -710,10 +710,10 @@
           "type": "integer",
           "minimum": 0
         },
-        "percentage": {
+        "percentage_pc": {
           "type": "number",
           "minimum": 0,
-          "maximum": 1
+          "maximum": 100
         }
       }
     },
@@ -1173,7 +1173,7 @@
       "additionalProperties": false,
       "required": [
         "address",
-        "deviation_pct",
+        "deviation_pc",
         "noHeartbeat_ms",
         "lastHeartbeat_ms",
         "now_ms"
@@ -1182,7 +1182,7 @@
         "address": {
           "type": "string"
         },
-        "deviation_pct": {
+        "deviation_pc": {
           "type": "number"
         },
         "noHeartbeat_ms": {
@@ -1219,57 +1219,69 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "frames_pct",
+        "frames_pc",
         "frames",
-        "priorityFrames_pct",
+        "priorityFrames_pc",
         "priorityFrames",
-        "bytes_pct",
+        "bytes_pc",
         "bytes",
-        "events_pct",
+        "events_pc",
         "events",
-        "handleCount_pct",
+        "handleCount_pc",
         "handleCount",
-        "tasks_pct",
+        "tasks_pc",
         "tasks"
       ],
       "properties": {
-        "frames_pct": {
-          "type": "number"
+        "frames_pc": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
         },
         "frames": {
           "type": "integer",
           "minimum": 0
         },
-        "priorityFrames_pct": {
-          "type": "number"
+        "priorityFrames_pc": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
         },
         "priorityFrames": {
           "type": "integer",
           "minimum": 0
         },
-        "bytes_pct": {
-          "type": "number"
+        "bytes_pc": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
         },
         "bytes": {
           "type": "integer",
           "minimum": 0
         },
-        "events_pct": {
-          "type": "number"
+        "events_pc": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
         },
         "events": {
           "type": "integer",
           "minimum": 0
         },
-        "handleCount_pct": {
-          "type": "number"
+        "handleCount_pc": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
         },
         "handleCount": {
           "type": "integer",
           "minimum": 0
         },
-        "tasks_pct": {
-          "type": "number"
+        "tasks_pc": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
         },
         "tasks": {
           "type": "integer",
@@ -1308,7 +1320,7 @@
       "required": [
         "connectionType",
         "sampleCount",
-        "percentage"
+        "percentage_pc"
       ],
       "properties": {
         "connectionType": {
@@ -1318,10 +1330,10 @@
           "type": "integer",
           "minimum": 0
         },
-        "percentage": {
+        "percentage_pc": {
           "type": "number",
           "minimum": 0,
-          "maximum": 1
+          "maximum": 100
         }
       }
     },
@@ -1424,7 +1436,7 @@
       "required": [
         "operation",
         "samples",
-        "percentage"
+        "percentage_pc"
       ],
       "properties": {
         "operation": {
@@ -1434,7 +1446,7 @@
           "type": "integer",
           "minimum": 0
         },
-        "percentage": {
+        "percentage_pc": {
           "type": "number",
           "minimum": 0,
           "maximum": 100
@@ -1556,20 +1568,16 @@
       "additionalProperties": false,
       "required": [
         "operation",
-        "duration",
-        "unit"
+        "duration_ms"
       ],
       "properties": {
         "operation": {
           "type": "string",
           "description": "Operation class name or descriptor (e.g. GetOperation, Backup[GetOperation])."
         },
-        "duration": {
+        "duration_ms": {
           "type": "integer",
           "minimum": 0
-        },
-        "unit": {
-          "const": "ms"
         }
       }
     },

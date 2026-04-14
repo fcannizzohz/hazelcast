@@ -136,7 +136,7 @@ public class JsonOperationThreadSamplerPlugin extends JsonDiagnosticsPlugin {
             writer.startArrayItem();
             writer.writeString("operation", name);
             writer.writeLong("samples", count);
-            writer.writeDouble("percentage", percentage);
+            writer.writeDouble("percentage_pc", percentage);
             writer.endArrayItem();
         }
         writer.endArray();
