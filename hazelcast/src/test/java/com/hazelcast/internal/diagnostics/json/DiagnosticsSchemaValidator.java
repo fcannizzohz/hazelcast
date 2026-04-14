@@ -25,8 +25,6 @@ import com.networknt.schema.ValidationMessage;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Set;
 
 /**
@@ -41,13 +39,12 @@ import java.util.Set;
  * assertTrue("Schema violations: " + errors, errors.isEmpty());
  * }</pre>
  *
- * <p>The schema is loaded once from the source tree on first access; subsequent
+ * <p>The schema is loaded once from the classpath on first access; subsequent
  * calls reuse the compiled schema for efficiency.
  */
 public final class DiagnosticsSchemaValidator {
 
-    private static final Path SCHEMA_PATH = Path.of(
-            "src/main/java/com/hazelcast/internal/diagnostics/json/diaglogs.schema.json");
+    private static final String SCHEMA_RESOURCE = "diaglogs.schema.json";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private static volatile DiagnosticsSchemaValidator instance;
@@ -56,11 +53,13 @@ public final class DiagnosticsSchemaValidator {
 
     private DiagnosticsSchemaValidator() {
         JsonSchemaFactory factory = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012);
-        try (InputStream is = Files.newInputStream(SCHEMA_PATH)) {
+        try (InputStream is = DiagnosticsSchemaValidator.class.getResourceAsStream(SCHEMA_RESOURCE)) {
+            if (is == null) {
+                throw new IllegalStateException("Schema not found on classpath: " + SCHEMA_RESOURCE);
+            }
             this.schema = factory.getSchema(is);
         } catch (IOException e) {
-            throw new IllegalStateException(
-                    "Failed to load diagnostics JSON schema from " + SCHEMA_PATH.toAbsolutePath(), e);
+            throw new IllegalStateException("Failed to load diagnostics JSON schema", e);
         }
     }
 
