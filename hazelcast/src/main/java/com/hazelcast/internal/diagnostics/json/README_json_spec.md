@@ -246,15 +246,16 @@ interface MetricContent {
   // null   — collectNoValue (metric registered but no value at collection time)
   // collectException metrics are skipped (probe implementation bug; check logs)
   // key examples:
-  //   "jvm.memory.heap.used_bytes"   (prefix=jvm.memory, metric=heap.used, unit=BYTES)
-  //   "jvm.memory.heap.used_pct"     (prefix=jvm.memory, metric=heap.used, unit=PERCENT)
-  //   "os.cpu.load"                  (no unit)
-  //   "testLongMetric"               (no prefix, no unit)
+  //   "memory.usedHeap_bytes"        (prefix=memory, metric=usedHeap, unit=BYTES)
+  //   "gc.majorTime_ms"              (prefix=gc, metric=majorTime, unit=MS)
+  //   "os.processCpuLoad"            (prefix=os, metric=processCpuLoad, no unit)
+  //   "operation.invocations.pending_count" (prefix=operation.invocations, metric=pending, unit=COUNT)
+  //   "blockingWorkerCount_count"    (no prefix, metric=blockingWorkerCount, unit=COUNT)
 }
 ```
 
 ```json
-{"epoch":1710849600000,"name":"Metric","content":{"jvm.memory.heap.used_bytes":1048576,"jvm.memory.heap.used_pct":68.4,"os.cpu.load":null,"operation.thread.completedOperationCount_count":2048}}
+{"epoch":1710849600000,"name":"Metric","content":{"memory.usedHeap_bytes":1073741824,"memory.maxHeap_bytes":4294967296,"gc.majorTime_ms":1200,"gc.minorTime_ms":340,"os.processCpuLoad":0.12,"os.systemCpuLoad":null,"operation.invocations.pending_count":0,"operation.thread.completedOperationCount_count":2048}}
 ```
 
 > **STANDARD vs JSON difference:** STANDARD uses the raw `[metric=...,unit=...]`
@@ -355,7 +356,9 @@ interface SlowOperationEntry {
   stackTrace: {
     entries?: StackLineEntry[];
   };
-  slowInvocations?: InvocationEntry[];   // array; absent when no invocations
+  slowInvocations?: {
+    entries?: InvocationEntry[];   // absent when no invocations recorded
+  };
 }
 
 interface StackLineEntry {
@@ -379,9 +382,11 @@ interface InvocationEntry {
         { "line": "at com.hazelcast.spi.impl.operationexecutor.impl.OperationThread.run(OperationThread.java:176)" }
       ]
     },
-    "slowInvocations": [
-      { "startedAt": 1710849540000, "duration_ms": 8200, "operationDetails": "PutOperation{...}" }
-    ]
+    "slowInvocations": {
+      "entries": [
+        { "startedAt": 1710849540000, "duration_ms": 8200, "operationDetails": "PutOperation{...}" }
+      ]
+    }
   }
 }}
 ```
@@ -450,7 +455,7 @@ interface MemberEntry {
 
 ```typescript
 interface ConnectionContent {
-  remoteAddress: string;        // remote endpoint address, e.g. "192.168.1.11:5701"; "null" when unavailable
+  remoteAddress: string | null; // remote endpoint address, e.g. "192.168.1.11:5701"; null when unavailable
   type?:        string;         // connection type (e.g. "MEMBER"); absent for non-ServerConnection
   isAlive:      boolean;
   closeReason?: string;         // present only for ConnectionRemoved
@@ -1233,11 +1238,11 @@ key names require escaping in most query languages, and the format is not
 documented as stable API. For JSON mode a new key format was introduced:
 
 ```
-[prefix.]metric[discriminator=value][tag=value]*(unit)
+[prefix.]metric[_unit]
 ```
 
-Examples: `jvm.memory.heap.used(bytes)`, `map.size[instance=myMap]`,
-`os.cpu.load`.
+Examples: `memory.usedHeap_bytes`, `gc.majorTime_ms`, `os.processCpuLoad`
+(no unit suffix when the probe has no unit annotation).
 
 This format can be used directly as a Prometheus/Grafana label pattern or as a
 LogQL field name. The old `metricString()` format is preserved for STANDARD
@@ -1394,7 +1399,7 @@ traces) the JSON output is often *smaller* than STANDARD because the indentation
 whitespace is eliminated. For `MetricsPlugin`, each JSON line is roughly:
 
 ```
-{"epoch":1710849600000,"name":"Metric","content":{"jvm.memory.heap.used(bytes)":1048576,"jvm.memory.heap.used(percent)":68.4,"os.cpu.load":null}}
+{"epoch":1710849600000,"name":"Metric","content":{"memory.usedHeap_bytes":1073741824,"memory.maxHeap_bytes":4294967296,"os.processCpuLoad":0.12,"os.systemCpuLoad":null}}
 ```
 
 versus the STANDARD equivalent (one section per metric):

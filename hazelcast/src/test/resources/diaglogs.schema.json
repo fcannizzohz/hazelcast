@@ -1059,8 +1059,8 @@
       ],
       "properties": {
         "remoteAddress": {
-          "type": "string",
-          "description": "Remote endpoint address in host:port format."
+          "type": ["string", "null"],
+          "description": "Remote endpoint address in host:port format; null when the connection has no remote address."
         },
         "type": {
           "type": "string"

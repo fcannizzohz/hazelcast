@@ -234,7 +234,11 @@ public class JsonSystemLogPlugin extends JsonDiagnosticsPlugin {
         writer.startEntry(epoch, name);
         Connection connection = event.connection;
         Address remoteAddr = connection.getRemoteAddress();
-        writer.writeString("remoteAddress", remoteAddr != null ? formatAddress(remoteAddr) : "null");
+        if (remoteAddr != null) {
+            writer.writeString("remoteAddress", formatAddress(remoteAddr));
+        } else {
+            writer.writeNull("remoteAddress");
+        }
         if (connection instanceof ServerConnection serverConnection) {
             writer.writeString("type", serverConnection.getConnectionType());
         }
