@@ -42,9 +42,9 @@ file line-by-line (NDJSON style).
 
 ```typescript
 interface DiagnosticsLine {
-  epoch:  number;   // always present; milliseconds since Unix epoch
-  name:   string;   // message-type discriminator; see table below
-  content: object;  // plugin-specific payload; always an object, never null
+    epoch:  number;   // always present; milliseconds since Unix epoch
+    name:   string;   // message-type discriminator; see table below
+    content: object;  // plugin-specific payload; always an object, never null
 }
 ```
 
@@ -111,8 +111,8 @@ The `"entries"` key appears inside a section when the plugin calls
   were made.
 - **Always an array** when present — even if only one item was written.
 - **Always objects**: every item in the array is a JSON object.
-  - `writeEntry(String)` produces `{"text": "<escaped value>"}`.
-  - `writeStructuredEntry(kvPairs)` produces an object with plugin-defined keys.
+    - `writeEntry(String)` produces `{"text": "<escaped value>"}`.
+    - `writeStructuredEntry(kvPairs)` produces an object with plugin-defined keys.
 
 ```json
 {"entries":[{"text":"plain text"},{"key":"value"},{"text":"another plain text"}]}
@@ -232,7 +232,7 @@ interface SystemPropertiesContent {
 
 One `metricsRegistry.collect()` call produces exactly **one** JSON line.
 All metrics are flat key-value pairs directly inside `content` — no wrapper
-arrays.  This keeps Loki field extraction simple (each metric is directly
+arrays.  This keeps field extraction simple (each metric is directly
 accessible as a label after the `json` pipeline stage) and minimises line size.
 
 **Metric key format:** `[prefix.]metric[_unit]`
@@ -1117,7 +1117,7 @@ humans (comma grouping), and there is no stable field schema.
 Provide a machine-readable output mode that:
 
 1. Requires no changes to existing deployments using STANDARD format.
-2. Produces output directly consumable by Loki, Elasticsearch/OpenSearch,
+2. Produces output directly consumable by jq, Loki, Elasticsearch/OpenSearch,
    Splunk, and any other tool that understands NDJSON.
 3. Preserves all information that the STANDARD format carries.
 4. Allows existing STANDARD log files to be converted to JSON retroactively.
@@ -1257,132 +1257,6 @@ keys while keeping the same information. The STANDARD path is unchanged.
 
 ---
 
-## Log ingestion with Loki and Grafana
-
-The JSON output format was designed with Loki (and compatible push-model
-aggregators) as a primary target. This section shows a concrete integration.
-
-### Why this schema suits log aggregation
-
-Three properties make the output directly ingestible:
-
-1. **One JSON object per line (NDJSON).** Loki, Fluentd, Filebeat, and
-   Promtail all work natively with newline-delimited JSON. No multi-line
-   combiner rules, no custom parsers for nested indented blocks.
-
-2. **`epoch` is always present and is a Unix millisecond integer.** Loki
-   requires a monotonically increasing timestamp per stream. The `epoch` field
-   maps directly to Loki's timestamp with no parsing or timezone conversion.
-   There is no separate human-readable timestamp field — `epoch` is the single
-   source of truth, and Loki / Grafana can display it in any timezone.
-
-3. **`name` is a stable low-cardinality discriminator.** There are roughly 25
-   known `name` values (one per plugin/event type). Using `name` as a Loki
-   stream label keeps cardinality bounded and enables efficient stream
-   selection: `{job="hazelcast", name="SlowOperations"}`.
-
-### Promtail / Grafana Alloy pipeline
-
-The following Promtail `scrape_configs` snippet tails a diagnostics log file
-and ships it to Loki with correct timestamps and labels:
-
-```yaml
-scrape_configs:
-  - job_name: hazelcast_diagnostics
-    static_configs:
-      - targets: [localhost]
-        labels:
-          job: hazelcast
-          host: __hostname__
-          __path__: /var/log/hazelcast/diagnostics*.log
-
-    pipeline_stages:
-      # 1. Parse the JSON line into fields
-      - json:
-          expressions:
-            epoch:   epoch
-            name:    name
-
-      # 2. Use epoch (Unix ms) as the Loki timestamp — precise and timezone-free
-      - timestamp:
-          source: epoch
-          format: UnixMs
-
-      # 3. Promote 'name' to a stream label for efficient log stream selection
-      - labels:
-          name:
-```
-
-With Grafana Alloy replace the `scrape_configs` block with the equivalent
-`loki.source.file` / `loki.process` River pipeline:
-
-```hcl
-loki.source.file "hazelcast_diagnostics" {
-  targets = [{__path__ = "/var/log/hazelcast/diagnostics*.log", job = "hazelcast"}]
-  forward_to = [loki.process.diag.receiver]
-}
-
-loki.process "diag" {
-  forward_to = [loki.write.default.receiver]
-
-  stage.json {
-    expressions = {epoch = "", name = ""}
-  }
-  stage.timestamp {
-    source = "epoch"
-    format = "UnixMs"
-  }
-  stage.labels {
-    values = {name = ""}
-  }
-}
-```
-
-### Example Grafana LogQL queries
-
-Once the pipeline is in place, these LogQL expressions cover the most common
-diagnostics use cases:
-
-```logql
-# All slow operations in the last hour
-{job="hazelcast", name="SlowOperations"}
-
-# Heap memory usage over time (MetricsPlugin)
-{job="hazelcast", name="Metric"}
-  | json
-  | label_format metric=`content_jvm_memory_heap_used_bytes`
-
-# JVM heap used, extracted as a metric for a time-series panel
-sum by (host) (
-  last_over_time(
-    {job="hazelcast", name="Metric"}
-      | json
-      | unwrap content_jvm_memory_heap_used_bytes [1m]
-  )
-)
-
-# All connection removals that had a close cause
-{job="hazelcast", name="ConnectionRemoved"}
-  | json
-  | content_CloseCause != ""
-
-# Overloaded connections with more than 10 000 packets
-{job="hazelcast", name="OverloadedConnections"}
-  | json
-  | line_format `{{.content}}`
-
-# Member added/removed events for a cluster topology view
-{job="hazelcast", name=~"MemberAdded|MemberRemoved"}
-```
-
-> **Field naming in LogQL.** Loki's `| json` stage extracts nested JSON fields
-> using underscore-joined paths. `content.jvm.memory.heap.used(bytes)` becomes
-> `content_jvm_memory_heap_used_bytes_` (parentheses and dots are replaced with
-> underscores). Use `line_format` or `label_format` to handle these names
-> programmatically if the exact key name varies.
-
----
-
 ## Performance
 
 ### Execution model — why absolute overhead is bounded
@@ -1423,17 +1297,17 @@ path are:
    `DiagnosticsLogWriterImpl` instance. After the JVM warms up (typically a few
    hundred invocations), the C2 JIT compiler:
 
-   - **Devirtualizes** `getFormat()` at each call site because the call site is
-     *monomorphic* — only one concrete type (`DiagnosticsLogWriterImpl`) has
-     ever been observed there. C2 guards on the concrete type and inlines the
-     method body, replacing the virtual dispatch with a direct load of
-     `DiagnosticsLogFormat.STANDARD`.
-   - **Folds the branch** `if (STANDARD == JSON)` to compile-time `false`
-     because both sides of the comparison are now compile-time constants in the
-     inlined body.
-   - **Dead-code-eliminates** the JSON branch entirely, producing native code
-     identical to what the plugin would have generated if the branch had never
-     been written.
+    - **Devirtualizes** `getFormat()` at each call site because the call site is
+      *monomorphic* — only one concrete type (`DiagnosticsLogWriterImpl`) has
+      ever been observed there. C2 guards on the concrete type and inlines the
+      method body, replacing the virtual dispatch with a direct load of
+      `DiagnosticsLogFormat.STANDARD`.
+    - **Folds the branch** `if (STANDARD == JSON)` to compile-time `false`
+      because both sides of the comparison are now compile-time constants in the
+      inlined body.
+    - **Dead-code-eliminates** the JSON branch entirely, producing native code
+      identical to what the plugin would have generated if the branch had never
+      been written.
 
    The net result: after JIT warm-up, STANDARD-mode plugins run the same native
    instruction sequence as before. The branches exist in bytecode but not in the
@@ -1558,347 +1432,3 @@ zero-allocation rewrite.
 
 ---
 
-## Support and root-cause analysis with jq
-
-This section provides ready-to-run `jq` recipes for support engineers and
-on-call engineers working from a collected JSON diagnostic log file.
-
-**Assumptions:**
-- Log file is named `diag.log` — one JSON object per line (NDJSON).
-- `jq` 1.6+ is installed.
-- Timestamps shown by `jq` are epoch-milliseconds unless converted.
-- Recipes target the **JSON format** produced by `DiagnosticsLogWriterJsonImpl`.
-
-**Convert epoch ms to a human-readable date (append to any recipe):**
-```bash
-| .epoch |= (. / 1000 | strftime("%Y-%m-%dT%H:%M:%SZ"))
-```
-
----
-
-### Navigation — orient yourself in an unknown log file
-
-```bash
-# How many events are in the file?
-wc -l diag.log
-
-# What plugin names appear, and how many times?
-jq -r '.name' diag.log | sort | uniq -c | sort -rn
-
-# What is the time range of the log?
-jq -s '[.[].epoch] | {first: min, last: max, span_minutes: ((max - min) / 60000)}' diag.log
-
-# Pretty-print a single event by name (first match)
-jq 'select(.name == "BuildInfo")' diag.log | head -1 | jq .
-
-# List all distinct event names in chronological order of first occurrence
-jq -r '.name' diag.log | awk '!seen[$0]++'
-```
-
----
-
-### Build and configuration — what is actually running
-
-```bash
-# Hazelcast version, revision and build number
-jq 'select(.name == "BuildInfo") | .content | {Version, Revision, BuildNumber, Enterprise}' diag.log
-
-# Call timeout and slow-operation settings (key config knobs for latency cases)
-jq 'select(.name == "ConfigProperties") | .content |
-    to_entries |
-    map(select(.key | test("timeout|slow|backpressure|operation"; "i"))) |
-    from_entries' diag.log
-
-# JVM version and OS
-jq 'select(.name == "SystemProperties") | .content |
-    {"java.version", "os.name", "os.version", "user.timezone"}' diag.log
-```
-
----
-
-### Memory pressure — is the JVM running out of heap?
-
-```bash
-# Heap used (bytes) and percent over time
-jq 'select(.name == "Metric") |
-    {epoch,
-     heap_used_bytes: .content["jvm.memory.heap.used(bytes)"],
-     heap_used_pct:   .content["jvm.memory.heap.used(percent)"],
-     heap_max_bytes:  .content["jvm.memory.heap.max(bytes)"]}' diag.log
-
-# Flag samples where heap is above 80 %
-jq 'select(.name == "Metric") |
-    select(.content["jvm.memory.heap.used(percent)"] > 80) |
-    {epoch, pct: .content["jvm.memory.heap.used(percent)"]}' diag.log
-
-# Peak heap percent across the whole file
-jq 'select(.name == "Metric") | .content["jvm.memory.heap.used(percent)"] // empty' diag.log \
-  | jq -s 'max'
-
-# GC collection time (if present) — rising values indicate GC pressure
-jq 'select(.name == "Metric") |
-    {epoch, gc_time: .content["jvm.gc.collectionTime(ms)"]}' diag.log \
-  | jq 'select(.gc_time != null)'
-
-# CPU load over time (processCpuLoad is the JVM process; cpu.load is system)
-jq 'select(.name == "Metric") |
-    {epoch,
-     process_cpu: .content["os.processCpuLoad(percent)"],
-     system_cpu:  .content["os.cpu.load"]}' diag.log
-```
-
----
-
-### Slow operations — where is time being spent?
-
-```bash
-# All SlowOperations events — which operation classes appeared?
-jq 'select(.name == "SlowOperations") | .content | keys[]' diag.log | sort | uniq -c | sort -rn
-
-# For each slow-operations event: operation class, invocation count, worst duration
-jq 'select(.name == "SlowOperations") |
-    .epoch as $e |
-    .content | to_entries[] |
-    {epoch: $e,
-     operation: .key,
-     invocations: .value.invocations,
-     worst_duration_ms: (.value.slowInvocations.entries // [] | map(.duration_ms) | max)}' diag.log
-
-# Stack trace for a specific operation (first occurrence)
-jq 'select(.name == "SlowOperations") |
-    select(.content["com.hazelcast.map.impl.operation.PutOperation"] != null) |
-    .content["com.hazelcast.map.impl.operation.PutOperation"].stackTrace.entries[].line' \
-  diag.log | head -20
-
-# Top-10 slowest individual invocations across all events
-jq 'select(.name == "SlowOperations") |
-    .content | to_entries[] |
-    .key as $op |
-    .value.slowInvocations.entries // [] |
-    .[] |
-    {operation: $op, startedAt, duration_ms, details: .operationDetails}' \
-  diag.log \
-  | jq -s 'sort_by(-.duration_ms) | .[0:10][]'
-
-# OperationsProfiler — operations sorted by average latency
-jq 'select(.name == "OperationsProfiler") |
-    .content | to_entries |
-    sort_by(-.value.avg_us) |
-    .[] |
-    {operation: .key, count: .value.count, avg_us: .value.avg_us, max_us: .value.max_us}' \
-  diag.log
-
-# What was running on operation threads at sample time?
-jq 'select(.name == "OperationThreadSamples") |
-    {epoch,
-     partition: (.content.Partition.entries // []),
-     generic:   (.content.Generic.entries   // [])}' diag.log
-```
-
----
-
-### Stuck operations — invocation backlog and timeouts
-
-```bash
-# Pending invocation count over time
-jq 'select(.name == "PendingInvocations") | {epoch, count: .content.count}' diag.log
-
-# Peak pending invocations (a spike here often precedes a timeout storm)
-jq 'select(.name == "PendingInvocations") | .content.count' diag.log \
-  | jq -s 'max'
-
-# Which operations are dominating the pending queue?
-jq 'select(.name == "PendingInvocations") |
-    .content.invocations.entries // [] |
-    sort_by(-.count) | .[0:5][]' diag.log
-
-# Invocations plugin — slow pending ops (duration in ms)
-jq 'select(.name == "Invocations") |
-    .epoch as $e |
-    (.content.Pending.entries // []) |
-    sort_by(-.duration) |
-    .[] | {epoch: $e, operation, duration_ms: .duration}' diag.log
-
-# SlowHistory — which operation types have accumulated slow-invocation samples?
-jq 'select(.name == "Invocations") |
-    select((.content.SlowHistory.entries // []) | length > 0) |
-    {epoch, slow_history: .content.SlowHistory.entries}' diag.log
-
-# History — flatten to {epoch, operation, samples} rows, sorted by samples desc
-jq 'select(.name == "Invocations") |
-    .epoch as $e |
-    (.content.History.entries // []) |
-    .[] |
-    {epoch: $e, operation, samples}' diag.log \
-  | jq -s 'sort_by(-.samples)'
-
-# InvocationProfiler — average and max latency per operation type
-jq 'select(.name == "InvocationProfiler") |
-    .content | to_entries |
-    sort_by(-.value.max_us) |
-    .[] |
-    {operation: .key, count: .value.count, avg_us: .value.avg_us, max_us: .value.max_us}' \
-  diag.log
-```
-
----
-
-### Network and heartbeat anomalies — split-brain and connectivity
-
-```bash
-# All OperationHeartbeat events (only emitted when deviation exceeds threshold)
-jq 'select(.name == "OperationHeartbeat")' diag.log
-
-# Members with deviation > 100 % across all OperationHeartbeat events
-jq 'select(.name == "OperationHeartbeat") |
-    .epoch as $e |
-    .content.members[] |
-    select(.deviation_pct > 100) |
-    {epoch: $e, address, deviation_pct, no_heartbeat_ms: .noHeartbeat_ms}' \
-  diag.log
-
-# Timeline of heartbeat deviations for a specific member
-jq --arg addr "192.168.1.11:5701" '
-    select(.name == "OperationHeartbeat" or .name == "MemberHeartbeats") |
-    .epoch as $e | .name as $plugin |
-    .content.members[] |
-    select(.address == $addr) |
-    {epoch: $e, plugin: $plugin, deviation_pct, no_heartbeat_ms: .noHeartbeat_ms}' \
-  diag.log
-
-# Worst single deviation across all heartbeat events
-jq 'select(.name == "OperationHeartbeat" or .name == "MemberHeartbeats") |
-    .content.members[].deviation_pct' diag.log \
-  | jq -s 'max'
-
-# Connection events — member connections opening and closing
-jq 'select(.name == "ConnectionAdded" or .name == "ConnectionRemoved") |
-    {epoch, event: .name, remoteAddress: .content.remoteAddress,
-     type: .content.type, alive: .content.isAlive,
-     reason: .content.closeReason}' diag.log
-
-# Connection removals with a close cause (indicates abnormal disconnect)
-jq 'select(.name == "ConnectionRemoved") |
-    select(.content.CloseCause != null) |
-    {epoch,
-     remoteAddress: .content.remoteAddress,
-     reason: .content.closeReason,
-     exception: .content.CloseCause.entries[0].exceptionClass,
-     message:   .content.CloseCause.entries[0].message}' diag.log
-
-# Overloaded connections — which remote addresses are being flooded?
-jq 'select(.name == "OverloadedConnections") |
-    .epoch as $e |
-    .content.connection[] |
-    {epoch: $e, from, to,
-     packets: (.packetCount // .urgentPacketCount),
-     top_type: (.samples.entries // [] | sort_by(-.sampleCount) | .[0].connectionType)}' \
-  diag.log
-```
-
----
-
-### Cluster membership — member joins, leaves and state changes
-
-```bash
-# All membership events in order
-jq 'select(.name == "MemberAdded" or .name == "MemberRemoved") |
-    {epoch, event: .name, member: .content.member}' diag.log
-
-# Members that left the cluster
-jq 'select(.name == "MemberRemoved") | {epoch, member: .content.member}' diag.log
-
-# Cluster size over time (from HazelcastInstance snapshots)
-jq 'select(.name == "HazelcastInstance") |
-    {epoch, clusterSize: .content.clusterSize, nodeState: .content.nodeState,
-     isMaster: .content.isMaster}' diag.log
-
-# Detect when the node was not in ACTIVE state
-jq 'select(.name == "HazelcastInstance") |
-    select(.content.nodeState != "ACTIVE") |
-    {epoch, nodeState: .content.nodeState}' diag.log
-
-# Node lifecycle transitions (STARTING → STARTED → SHUTTING_DOWN → SHUTDOWN)
-jq 'select(.name == "Lifecycle") |
-    {epoch, state: .content.state}' diag.log
-```
-
----
-
-### Map and cache store latency — MapLoader / MapStore performance
-
-```bash
-# All StoreLatency events
-jq 'select(.name == "StoreLatency")' diag.log
-
-# Which services have latency data?
-jq 'select(.name == "StoreLatency") | .content.service' diag.log | sort | uniq -c
-
-# Average and max load latency per map (MapService), sorted by worst average
-jq 'select(.name == "StoreLatency" and .content.service == "MapService") |
-    .content | del(.service) | to_entries[] |
-    .key as $map |
-    (.value.load // empty) |
-    {map: $map, count, avg_us, max_us}' \
-  diag.log \
-  | jq -s 'sort_by(-.avg_us)[]'
-
-# Any MapService load operation averaging > 1 ms (1000 us)
-jq 'select(.name == "StoreLatency" and .content.service == "MapService") |
-    .content | del(.service) | to_entries[] |
-    select(.value.load.avg_us > 1000) |
-    {map: .key, avg_us: .value.load.avg_us, max_us: .value.load.max_us}' diag.log
-
-# CacheService — same pattern, different service filter
-jq 'select(.name == "StoreLatency" and .content.service == "CacheService") |
-    .content | del(.service) | to_entries[] |
-    .key as $cache |
-    (.value.load // empty) |
-    {cache: $cache, count, avg_us, max_us}' diag.log
-```
-
----
-
-### Cross-plugin timeline — correlate events around a suspected incident
-
-```bash
-# Full event timeline: epoch + name (useful to paste into a spreadsheet or ticket)
-jq '{epoch, name}' diag.log
-
-# Narrow to a time window (epoch ms — adjust bounds to the incident window)
-jq 'select(.epoch >= 1742385500000 and .epoch <= 1742385700000) | {epoch, name}' diag.log
-
-# All significant events in a window: slow ops, heartbeat issues, membership changes,
-# high heap, lifecycle — in one timeline
-jq 'select(
-      .name == "SlowOperations"       or
-      .name == "OperationHeartbeat"   or
-      .name == "MemberHeartbeats"     or
-      .name == "MemberAdded"          or
-      .name == "MemberRemoved"        or
-      .name == "ConnectionRemoved"    or
-      .name == "Lifecycle"
-    ) |
-    {epoch, name,
-     summary: (
-       if   .name == "SlowOperations"     then (.content | keys | join(", "))
-       elif .name == "OperationHeartbeat" then (.content.members | map(.address + " +" + (.deviation_pct | tostring) + "%") | join(", "))
-       elif .name == "MemberHeartbeats"   then (.content.members | map(.address + " +" + (.deviation_pct | tostring) + "%") | join(", "))
-       elif .name == "MemberAdded"        then ("+" + .content.member)
-       elif .name == "MemberRemoved"      then ("-" + .content.member)
-       elif .name == "ConnectionRemoved"  then (.content.remoteAddress + " reason=" + (.content.closeReason // "none"))
-       elif .name == "Lifecycle"          then .content.state
-       else "" end
-     )}' diag.log
-
-# Heap at every slow-operations event — did memory pressure coincide?
-jq -s '
-  (map(select(.name == "Metric")) | map({epoch, pct: .content["jvm.memory.heap.used(percent)"]})) as $heap |
-  .[] |
-  select(.name == "SlowOperations") |
-  .epoch as $e |
-  {epoch: $e,
-   slow_ops: (.content | keys),
-   heap_pct: ($heap | map(select(.epoch <= $e)) | sort_by(.epoch) | last | .pct)}
-' diag.log
-```
