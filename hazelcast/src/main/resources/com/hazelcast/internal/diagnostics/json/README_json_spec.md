@@ -880,6 +880,7 @@ interface HazelcastInstanceContent {
   isLite:       boolean;
   joined:       boolean;
   nodeState:    "ACTIVE" | "PASSIVE" | "SHUTTING_DOWN" | "SHUT_DOWN" | "null";
+  clusterName:  string;   // human-readable cluster name from config
   clusterId:    string;   // UUID string, or "null" when not yet assigned
   clusterSize:  number;
   isMaster:     boolean;
@@ -900,6 +901,7 @@ interface MemberAddressEntry {
   "isLite": false,
   "joined": true,
   "nodeState": "ACTIVE",
+  "clusterName": "prod-cluster",
   "clusterId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "clusterSize": 2,
   "isMaster": true,
