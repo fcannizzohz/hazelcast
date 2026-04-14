@@ -87,7 +87,8 @@ public class JsonSlowOperationPluginTest extends HazelcastTestSupport {
     @Test
     public void testRun_schemaValid() {
         plugin.run(entryWriter);
-        DiagnosticsSchemaValidator.get().assertValid(sw.toString().trim());
+        var errors = DiagnosticsSchemaValidator.get().validate(sw.toString().trim());
+        assertTrue("Schema violations: " + errors, errors.isEmpty());
     }
 
     @Test

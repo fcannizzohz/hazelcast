@@ -79,7 +79,8 @@ public class JsonStoreLatencyPluginTest {
         // The resulting JSON is still schema-valid.
         String output = sw.toString().trim();
         if (!output.isEmpty()) {
-            DiagnosticsSchemaValidator.get().assertValid(output);
+            var errors = DiagnosticsSchemaValidator.get().validate(output);
+            assertTrue("Schema violations: " + errors, errors.isEmpty());
         }
     }
 
@@ -117,7 +118,8 @@ public class JsonStoreLatencyPluginTest {
 
         String output = sw.toString().trim();
         assertFalse(output.isEmpty());
-        DiagnosticsSchemaValidator.get().assertValid(output);
+        var errors = DiagnosticsSchemaValidator.get().validate(output);
+        assertTrue("Schema violations: " + errors, errors.isEmpty());
     }
 
     @Test
@@ -132,7 +134,8 @@ public class JsonStoreLatencyPluginTest {
         String[] lines = sw.toString().split("\n");
         assertEquals(2, lines.length);
         for (String line : lines) {
-            DiagnosticsSchemaValidator.get().assertValid(line);
+            var errors = DiagnosticsSchemaValidator.get().validate(line);
+            assertTrue("Schema violations: " + errors, errors.isEmpty());
             JsonNode root = MAPPER.readTree(line);
             assertEquals("StoreLatency", root.get("name").asText());
             assertNotNull("service field required", root.get("content").get("service"));

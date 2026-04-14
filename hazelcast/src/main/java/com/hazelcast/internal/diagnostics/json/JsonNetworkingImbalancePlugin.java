@@ -110,17 +110,17 @@ public class JsonNetworkingImbalancePlugin extends JsonDiagnosticsPlugin {
 
         for (NioThread t : threads) {
             writer.startObject(t.getName());
-            writer.writeDouble("frames_pct", pct(t.framesTransceived(), totalFrames));
+            writer.writeDouble("frames_pc", pct(t.framesTransceived(), totalFrames));
             writer.writeLong("frames", t.framesTransceived());
-            writer.writeDouble("priorityFrames_pct", pct(t.priorityFramesTransceived(), totalPriorityFrames));
+            writer.writeDouble("priorityFrames_pc", pct(t.priorityFramesTransceived(), totalPriorityFrames));
             writer.writeLong("priorityFrames", t.priorityFramesTransceived());
-            writer.writeDouble("bytes_pct", pct(t.bytesTransceived(), totalBytes));
+            writer.writeDouble("bytes_pc", pct(t.bytesTransceived(), totalBytes));
             writer.writeLong("bytes", t.bytesTransceived());
-            writer.writeDouble("events_pct", pct(t.eventCount(), totalEvents));
+            writer.writeDouble("events_pc", pct(t.eventCount(), totalEvents));
             writer.writeLong("events", t.eventCount());
-            writer.writeDouble("handleCount_pct", pct(t.handleCount(), totalHandleCount));
+            writer.writeDouble("handleCount_pc", pct(t.handleCount(), totalHandleCount));
             writer.writeLong("handleCount", t.handleCount());
-            writer.writeDouble("tasks_pct", pct(t.completedTaskCount(), totalTasks));
+            writer.writeDouble("tasks_pc", pct(t.completedTaskCount(), totalTasks));
             writer.writeLong("tasks", t.completedTaskCount());
             writer.endObject();
         }

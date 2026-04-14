@@ -158,11 +158,11 @@ public class JsonOverloadedConnectionsPlugin extends JsonDiagnosticsPlugin {
             for (String key : sample.occurrences.keySet()) {
                 long count = sample.occurrences.get(key);
                 if (count > 0) {
-                    double percentage = (double) count / sample.sampleCount;
+                    double percentage = (double) count / sample.sampleCount * 100.0;
                     writer.startArrayItem();
                     writer.writeString("connectionType", key);
                     writer.writeLong("sampleCount", count);
-                    writer.writeDouble("percentage", percentage);
+                    writer.writeDouble("percentage_pc", percentage);
                     writer.endArrayItem();
                 }
             }

@@ -104,7 +104,7 @@ public class JsonMemberHeartbeatPlugin extends JsonDiagnosticsPlugin {
             double deviation = HUNDRED * ((double) (noHeartbeat - expectedInterval)) / expectedInterval;
             writer.startArrayItem();
             writer.writeString("address", formatAddress(member.getAddress()));
-            writer.writeDouble("deviation_pct", deviation);
+            writer.writeDouble("deviation_pc", deviation);
             writer.writeLong("noHeartbeat_ms", noHeartbeat);
             writer.writeLong("lastHeartbeat_ms", lastHeartbeat);
             writer.writeLong("now_ms", nowMillis);

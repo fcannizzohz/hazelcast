@@ -74,7 +74,8 @@ public class JsonBuildInfoPluginTest {
     public void testRun_schemaValid() throws Exception {
         plugin.run(entryWriter);
         String line = sw.toString().trim();
-        DiagnosticsSchemaValidator.get().assertValid(line);
+        var errors = DiagnosticsSchemaValidator.get().validate(line);
+        assertTrue("Schema violations: " + errors, errors.isEmpty());
     }
 
     @Test

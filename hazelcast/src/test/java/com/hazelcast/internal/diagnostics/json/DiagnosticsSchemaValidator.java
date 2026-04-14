@@ -25,23 +25,29 @@ import com.networknt.schema.ValidationMessage;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Set;
-
-import static org.junit.Assert.assertTrue;
 
 /**
  * Test utility that validates diagnostics JSON lines against
  * {@code diaglogs.schema.json} (JSON Schema draft 2020-12).
  *
- * <p>Acquire a singleton via {@link #get()} and call {@link #assertValid(String)}
- * from every JSON plugin test to enforce schema compliance.
+ * <p>Acquire a singleton via {@link #get()} and call {@link #validate(String)}
+ * to obtain the set of schema violations. An empty set means the line is valid.
  *
- * <p>The schema is loaded once from the classpath when the singleton is first
- * accessed; subsequent calls reuse the compiled schema for efficiency.
+ * <pre>{@code
+ * Set<ValidationMessage> errors = DiagnosticsSchemaValidator.get().validate(line);
+ * assertTrue("Schema violations: " + errors, errors.isEmpty());
+ * }</pre>
+ *
+ * <p>The schema is loaded once from the source tree on first access; subsequent
+ * calls reuse the compiled schema for efficiency.
  */
 public final class DiagnosticsSchemaValidator {
 
-    private static final String SCHEMA_RESOURCE = "/diaglogs.schema.json";
+    private static final Path SCHEMA_PATH = Path.of(
+            "src/main/java/com/hazelcast/internal/diagnostics/json/diaglogs.schema.json");
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private static volatile DiagnosticsSchemaValidator instance;
@@ -50,14 +56,11 @@ public final class DiagnosticsSchemaValidator {
 
     private DiagnosticsSchemaValidator() {
         JsonSchemaFactory factory = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012);
-        try (InputStream is = DiagnosticsSchemaValidator.class.getResourceAsStream(SCHEMA_RESOURCE)) {
-            if (is == null) {
-                throw new IllegalStateException("Schema not found on classpath: " + SCHEMA_RESOURCE
-                        + ". Copy diaglogs.schema.json to src/test/resources/");
-            }
+        try (InputStream is = Files.newInputStream(SCHEMA_PATH)) {
             this.schema = factory.getSchema(is);
         } catch (IOException e) {
-            throw new IllegalStateException("Failed to load diagnostics JSON schema", e);
+            throw new IllegalStateException(
+                    "Failed to load diagnostics JSON schema from " + SCHEMA_PATH.toAbsolutePath(), e);
         }
     }
 
@@ -76,21 +79,12 @@ public final class DiagnosticsSchemaValidator {
     }
 
     /**
-     * Asserts that {@code jsonLine} is valid according to the diagnostics schema.
-     * Fails the JUnit test with a descriptive message listing all violations if
-     * the line does not validate.
+     * Validates {@code jsonLine} against the diagnostics schema and returns
+     * the set of violations. An empty set means the line is valid.
      *
      * @param jsonLine a single NDJSON line produced by a JSON diagnostics plugin
-     */
-    public void assertValid(String jsonLine) {
-        Set<ValidationMessage> errors = validate(jsonLine);
-        assertTrue("JSON schema validation failed for line:\n  " + jsonLine
-                + "\nViolations:\n  " + formatErrors(errors), errors.isEmpty());
-    }
-
-    /**
-     * Validates {@code jsonLine} and returns the (possibly empty) set of violations.
-     * Does not throw; callers that need assertion semantics should use {@link #assertValid}.
+     * @return set of validation messages; empty if the line is schema-compliant
+     * @throws IllegalArgumentException if {@code jsonLine} is not valid JSON
      */
     public Set<ValidationMessage> validate(String jsonLine) {
         try {
@@ -99,13 +93,5 @@ public final class DiagnosticsSchemaValidator {
         } catch (IOException e) {
             throw new IllegalArgumentException("Not valid JSON: " + jsonLine, e);
         }
-    }
-
-    private static String formatErrors(Set<ValidationMessage> errors) {
-        StringBuilder sb = new StringBuilder();
-        for (ValidationMessage msg : errors) {
-            sb.append("  - ").append(msg).append('\n');
-        }
-        return sb.toString();
     }
 }

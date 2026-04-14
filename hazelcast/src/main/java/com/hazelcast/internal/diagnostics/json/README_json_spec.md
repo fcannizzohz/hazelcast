@@ -288,7 +288,7 @@ interface SampleEntry {
   dataStructureName?: string;   // name of the data structure (e.g. "employees")
   eventType?:         string;   // event type name (e.g. "UPDATED"), or runnable class name for unknown types
   sampleCount:        number;
-  percentage:         number;   // fraction 0.0–1.0 (not 0–100)
+  percentage_pc:      number;   // 0.0–100.0
 }
 // Note: for unknown/custom event runnables, only eventType (class name) is present.
 ```
@@ -300,8 +300,8 @@ interface SampleEntry {
     "sampleCount": 100,
     "samples": {
       "entries": [
-        { "serviceType": "IMap", "dataStructureName": "employees", "eventType": "UPDATED", "sampleCount": 72, "percentage": 0.72 },
-        { "serviceType": "IMap", "dataStructureName": "orders",    "eventType": "ADDED",   "sampleCount": 28, "percentage": 0.28 }
+        { "serviceType": "IMap", "dataStructureName": "employees", "eventType": "UPDATED", "sampleCount": 72, "percentage_pc": 72.0 },
+        { "serviceType": "IMap", "dataStructureName": "orders",    "eventType": "ADDED",   "sampleCount": 28, "percentage_pc": 28.0 }
       ]
     }
   }
@@ -564,7 +564,7 @@ interface OperationHeartbeatContent {
 }
 interface MemberHeartbeatEntry {
   address:        string;   // member address, e.g. "192.168.1.11:5701"
-  deviation_pct:  number;   // float: percentage over expected interval
+  deviation_pc:   number;   // float: percentage over expected interval (0–100+; can exceed 100 when overdue)
   noHeartbeat_ms: number;   // ms since last heartbeat
   lastHeartbeat_ms: number; // epoch ms of last heartbeat
   now_ms:         number;   // epoch ms at check time
@@ -572,7 +572,7 @@ interface MemberHeartbeatEntry {
 ```
 
 ```json
-{"epoch":1742385600000,"name":"OperationHeartbeat","content":{"members":[{"address":"192.168.1.11:5701","deviation_pct":66.66667,"noHeartbeat_ms":25000,"lastHeartbeat_ms":1710849575000,"now_ms":1710849600000}]}}
+{"epoch":1742385600000,"name":"OperationHeartbeat","content":{"members":[{"address":"192.168.1.11:5701","deviation_pc":66.66667,"noHeartbeat_ms":25000,"lastHeartbeat_ms":1710849575000,"now_ms":1710849600000}]}}
 ```
 
 > **STANDARD vs JSON difference:** STANDARD uses `"member" + address` as the
@@ -589,20 +589,20 @@ grep '"name":"OperationHeartbeat"' diag.log | jq .
 
 # Deviation percentage for every member in every event
 grep '"name":"OperationHeartbeat"' diag.log \
-  | jq '.content.members[] | {address, deviation_pct}'
+  | jq '.content.members[] | {address, deviation_pc}'
 
 # Only members whose deviation exceeds 100 %
 grep '"name":"OperationHeartbeat"' diag.log \
-  | jq '.content.members[] | select(.deviation_pct > 100) | {address, deviation_pct}'
+  | jq '.content.members[] | select(.deviation_pc > 100) | {address, deviation_pc}'
 
 # Worst deviation across all events (single number)
 grep '"name":"OperationHeartbeat"' diag.log \
-  | jq '.content.members[].deviation_pct' \
+  | jq '.content.members[].deviation_pc' \
   | jq -s 'max'
 
 # Timeline: epoch + address + deviation for all events, sorted by epoch
 grep '"name":"OperationHeartbeat"' diag.log \
-  | jq -s '[.[] | .epoch as $e | .content.members[] | {epoch: $e, address, deviation_pct}] | sort_by(.epoch)[]'
+  | jq -s '[.[] | .epoch as $e | .content.members[] | {epoch: $e, address, deviation_pc}] | sort_by(.epoch)[]'
 ```
 
 ---
@@ -617,7 +617,7 @@ interface MemberHeartbeatsContent {
 }
 interface MemberHeartbeatEntry {
   address:          string;
-  deviation_pct:    number;
+  deviation_pc:     number;   // float: percentage over expected interval (0–100+; can exceed 100 when overdue)
   noHeartbeat_ms:   number;
   lastHeartbeat_ms: number;
   now_ms:           number;
@@ -627,7 +627,7 @@ interface MemberHeartbeatEntry {
 Same shape as `OperationHeartbeat`; different data source and threshold.
 
 ```json
-{"epoch":1742385600000,"name":"MemberHeartbeats","content":{"members":[{"address":"192.168.1.11:5701","deviation_pct":120.0,"noHeartbeat_ms":11000,"lastHeartbeat_ms":1710849589000,"now_ms":1710849600000}]}}
+{"epoch":1742385600000,"name":"MemberHeartbeats","content":{"members":[{"address":"192.168.1.11:5701","deviation_pc":120.0,"noHeartbeat_ms":11000,"lastHeartbeat_ms":1710849589000,"now_ms":1710849600000}]}}
 ```
 
 ---
@@ -645,17 +645,17 @@ interface ThreadsSection {
   [threadName: string]: ThreadEntry;   // key is NioThread.getName(), e.g. "hz.thread.io.in.0"
 }
 interface ThreadEntry {
-  frames_pct:        number;   // double 0.0–100.0 in JSON; formatted string in STANDARD
+  frames_pc:         number;   // double 0.0–100.0; share of total frames handled by this thread
   frames:            number;
-  priorityFrames_pct: number;
+  priorityFrames_pc: number;
   priorityFrames:    number;
-  bytes_pct:         number;
+  bytes_pc:          number;
   bytes:             number;
-  events_pct:        number;
+  events_pc:         number;
   events:            number;
-  handleCount_pct:   number;
+  handleCount_pc:    number;
   handleCount:       number;
-  tasks_pct:         number;
+  tasks_pc:          number;
   tasks:             number;
 }
 ```
@@ -664,12 +664,12 @@ interface ThreadEntry {
 {"epoch":1742385600000,"name":"NetworkingImbalance","content":{
   "InputThreads": {
     "hz.thread.io.in.0": {
-      "frames_pct": 60.0, "frames": 600,
-      "priorityFrames_pct": 50.0, "priorityFrames": 50,
-      "bytes_pct": 55.5, "bytes": 55500,
-      "events_pct": 66.6, "events": 333,
-      "handleCount_pct": 70.0, "handleCount": 140,
-      "tasks_pct": 80.0, "tasks": 80
+      "frames_pc": 60.0, "frames": 600,
+      "priorityFrames_pc": 50.0, "priorityFrames": 50,
+      "bytes_pc": 55.5, "bytes": 55500,
+      "events_pc": 66.6, "events": 333,
+      "handleCount_pc": 70.0, "handleCount": 140,
+      "tasks_pc": 80.0, "tasks": 80
     }
   },
   "OutputThreads": {
@@ -678,7 +678,7 @@ interface ThreadEntry {
 }}
 ```
 
-> **STANDARD vs JSON difference:** `*-percentage` fields are `double` in JSON
+> **STANDARD vs JSON difference:** `*_pc` fields are `double` 0–100 in JSON
 > (e.g. `33.333...`). In STANDARD they are formatted strings (e.g. `"33,333.33 %"`).
 
 ---
@@ -705,7 +705,7 @@ interface ConnectionEntry {
 interface SampleEntry {
   connectionType: string;   // deserialized operation class name or packet class name
   sampleCount:    number;
-  percentage:     number;   // fraction 0.0–1.0 (not 0–100)
+  percentage_pc:  number;   // 0.0–100.0
 }
 ```
 
@@ -714,7 +714,7 @@ interface SampleEntry {
 > a single `"connection"` array so duplicate keys are impossible.
 
 ```json
-{"epoch":1710849600000,"name":"OverloadedConnections","content":{"connection":[{"from":"192.168.1.10:5701","to":"192.168.1.11:5701","packetCount":15000,"sampleCount":950,"samples":{"entries":[{"connectionType":"com.hazelcast.map.impl.operation.PutOperation","sampleCount":700,"percentage":0.736},{"connectionType":"com.hazelcast.map.impl.operation.GetOperation","sampleCount":250,"percentage":0.263}]}},{"from":"192.168.1.10:5701","to":"192.168.1.11:5701","urgentPacketCount":200,"sampleCount":50,"samples":{}}]}}
+{"epoch":1710849600000,"name":"OverloadedConnections","content":{"connection":[{"from":"192.168.1.10:5701","to":"192.168.1.11:5701","packetCount":15000,"sampleCount":950,"samples":{"entries":[{"connectionType":"com.hazelcast.map.impl.operation.PutOperation","sampleCount":700,"percentage_pc":73.6},{"connectionType":"com.hazelcast.map.impl.operation.GetOperation","sampleCount":250,"percentage_pc":26.3}]}},{"from":"192.168.1.10:5701","to":"192.168.1.11:5701","urgentPacketCount":200,"sampleCount":50,"samples":{}}]}}
 ```
 
 ---
@@ -847,9 +847,9 @@ interface ThreadSamplesSection {
   entries?: SampleEntry[];   // absent when no samples recorded for this category
 }
 interface SampleEntry {
-  operation:  string;   // class name, optionally suffixed with "#<dataStructureName>" when includeName=true
-  samples:    number;
-  percentage: number;   // 0.0–100.0 (not 0.0–1.0)
+  operation:     string;   // class name, optionally suffixed with "#<dataStructureName>" when includeName=true
+  samples:       number;
+  percentage_pc: number;   // 0.0–100.0
 }
 ```
 
@@ -857,16 +857,15 @@ interface SampleEntry {
 {"epoch":1742385600000,"name":"OperationThreadSamples","content":{
   "Partition": {
     "entries": [
-      { "operation": "com.hazelcast.map.impl.operation.PutOperation", "samples": 12, "percentage": 60.0 },
-      { "operation": "com.hazelcast.map.impl.operation.GetOperation", "samples": 8,  "percentage": 40.0 }
+      { "operation": "com.hazelcast.map.impl.operation.PutOperation", "samples": 12, "percentage_pc": 60.0 },
+      { "operation": "com.hazelcast.map.impl.operation.GetOperation", "samples": 8,  "percentage_pc": 40.0 }
     ]
   },
   "Generic": {}
 }}
 ```
 
-> **`percentage` scale:** 0–100 here (unlike `EventQueuePlugin` and
-> `OverloadedConnectionsPlugin` which use 0–1 fractions).
+> **`percentage_pc` scale:** 0–100 across all plugins.
 
 ---
 
@@ -932,10 +931,9 @@ interface PendingSection {
 }
 
 interface PendingEntry {
-  operation: string;   // operation class name or descriptor from OperationDescriptors.toOperationDesc()
-                       // e.g. "GetOperation", "Backup[PutOperation]"
-  duration:  number;   // ms since first invocation time
-  unit:      "ms";
+  operation:   string;   // operation class name or descriptor from OperationDescriptors.toOperationDesc()
+                        // e.g. "GetOperation", "Backup[PutOperation]"
+  duration_ms: number;   // ms since first invocation time
 }
 
 // Emitted when the slow-invocation count exceeds the configured max (default 100)
@@ -957,8 +955,8 @@ interface HistoryEntry {
 {"epoch":1710849600000,"name":"Invocations","content":{
   "Pending": {
     "entries": [
-      { "operation": "PutOperation", "duration": 12000, "unit": "ms" },
-      { "operation": "Backup[GetOperation]", "duration": 8500, "unit": "ms" }
+      { "operation": "PutOperation", "duration_ms": 12000 },
+      { "operation": "Backup[GetOperation]", "duration_ms": 8500 }
     ]
   },
   "History": {

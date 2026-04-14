@@ -96,7 +96,8 @@ public class JsonMetricsPluginTest extends HazelcastTestSupport {
         plugin.run(entryWriter);
         String line = sw.toString().trim();
         assertFalse("Expected non-empty output", line.isEmpty());
-        DiagnosticsSchemaValidator.get().assertValid(line);
+        var errors = DiagnosticsSchemaValidator.get().validate(line);
+        assertTrue("Schema violations: " + errors, errors.isEmpty());
     }
 
     @Test

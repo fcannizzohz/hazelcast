@@ -123,11 +123,11 @@ public class JsonEventQueuePlugin extends JsonDiagnosticsPlugin {
             if (count == 0) {
                 continue;
             }
-            double percentage = (double) count / actualSampleCount;
+            double percentage = (double) count / actualSampleCount * 100.0;
             writer.startArrayItem();
             writeEventKey(writer, key);
             writer.writeLong("sampleCount", count);
-            writer.writeDouble("percentage", percentage);
+            writer.writeDouble("percentage_pc", percentage);
             writer.endArrayItem();
         }
         writer.endArray();

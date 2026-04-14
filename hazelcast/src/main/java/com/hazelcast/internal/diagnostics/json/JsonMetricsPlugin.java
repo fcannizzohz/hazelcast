@@ -102,7 +102,7 @@ public class JsonMetricsPlugin extends JsonDiagnosticsPlugin {
             return null;
         }
         return switch (unit) {
-            case PERCENT -> "pct";
+            case PERCENT -> "pc";
             case BYTES -> "bytes";
             case MS -> "ms";
             case NS -> "ns";
