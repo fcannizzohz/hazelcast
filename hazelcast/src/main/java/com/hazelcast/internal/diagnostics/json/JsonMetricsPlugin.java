@@ -84,11 +84,15 @@ public class JsonMetricsPlugin extends JsonDiagnosticsPlugin {
 
     static String buildKey(MetricDescriptor descriptor) {
         String prefix = descriptor.prefix();
+        String discriminatorValue = descriptor.discriminatorValue();
         String metric = descriptor.metric();
         String unit = unitString(descriptor.unit());
         StringBuilder key = new StringBuilder();
         if (prefix != null && !prefix.isEmpty()) {
             key.append(prefix).append('.');
+        }
+        if (discriminatorValue != null && !discriminatorValue.isEmpty()) {
+            key.append(discriminatorValue).append('.');
         }
         key.append(metric);
         if (unit != null) {

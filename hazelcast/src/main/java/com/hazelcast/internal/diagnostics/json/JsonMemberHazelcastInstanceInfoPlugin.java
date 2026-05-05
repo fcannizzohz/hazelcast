@@ -69,16 +69,16 @@ public class JsonMemberHazelcastInstanceInfoPlugin extends JsonDiagnosticsPlugin
         writer.writeBoolean("joined", nodeEngine.getNode().getClusterService().isJoined());
 
         NodeState state = nodeEngine.getNode().getState();
-        writer.writeString("nodeState", state == null ? "null" : state.toString());
+        writer.writeString("nodeState", state == null ? null : state.toString());
 
         writer.writeString("clusterName", nodeEngine.getConfig().getClusterName());
         UUID clusterId = nodeEngine.getClusterService().getClusterId();
-        writer.writeString("clusterId", clusterId != null ? clusterId.toString() : "null");
+        writer.writeString("clusterId", clusterId != null ? clusterId.toString() : null);
         writer.writeLong("clusterSize", nodeEngine.getClusterService().getSize());
         writer.writeBoolean("isMaster", nodeEngine.getClusterService().isMaster());
 
         Address masterAddress = nodeEngine.getClusterService().getMasterAddress();
-        writer.writeString("masterAddress", masterAddress == null ? "null" : formatAddress(masterAddress));
+        writer.writeString("masterAddress", masterAddress == null ? null : formatAddress(masterAddress));
 
         Collection<MemberImpl> members = nodeEngine.getClusterService().getMemberImpls();
         writer.startObject("Members");

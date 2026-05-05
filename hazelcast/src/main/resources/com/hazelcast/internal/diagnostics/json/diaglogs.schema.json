@@ -678,7 +678,7 @@
     },
     "metricContent": {
       "type": "object",
-      "description": "Flat map of metric keys to values. Key pattern: [prefix.]metric[_unit], e.g. 'jvm.memory.heap.used_bytes'. Value is a number or null (no value collected).",
+      "description": "Flat map of metric keys to values. Key pattern: [prefix.][discriminatorValue.]metric[_unit], e.g. 'jvm.memory.heap.used_bytes' or 'map.employees.hits_count'. discriminatorValue is the data-structure instance name (map name, cache name, etc.) inserted between prefix and metric to avoid key collisions across instances. Value is a number or null (no value collected).",
       "additionalProperties": {
         "oneOf": [
           {"type": "number"},
