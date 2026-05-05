@@ -235,9 +235,12 @@ All metrics are flat key-value pairs directly inside `content` — no wrapper
 arrays.  This keeps field extraction simple (each metric is directly
 accessible as a label after the `json` pipeline stage) and minimises line size.
 
-**Metric key format:** `[prefix.]metric[_unit]`
-where `prefix` and `unit` are omitted when not present.
-Unit names: `bytes`, `ms`, `ns`, `pct`, `count`, `boolean`, `enum`, `us`.
+**Metric key format:** `[prefix.][discriminatorValue.]metric[_unit]`
+where `prefix`, `discriminatorValue`, and `unit` are omitted when not present.
+`discriminatorValue` is the instance name for data-structure metrics (e.g. the
+map name for `map.*` metrics), inserted between prefix and metric name so that
+metrics from different instances do not collide.
+Unit names: `bytes`, `ms`, `ns`, `pc`, `count`, `boolean`, `enum`, `us`.
 
 ```typescript
 interface MetricContent {
@@ -245,17 +248,22 @@ interface MetricContent {
   // number — collectLong / collectDouble
   // null   — collectNoValue (metric registered but no value at collection time)
   // collectException metrics are skipped (probe implementation bug; check logs)
-  // key examples:
+  // key examples (no discriminator):
   //   "memory.usedHeap_bytes"        (prefix=memory, metric=usedHeap, unit=BYTES)
   //   "gc.majorTime_ms"              (prefix=gc, metric=majorTime, unit=MS)
-  //   "os.processCpuLoad"            (prefix=os, metric=processCpuLoad, no unit)
+  //   "os.processCpuLoad"             (prefix=os, metric=processCpuLoad, no unit — but value is 0.0–100.0, NOT 0.0–1.0;
+  //                                   OperatingSystemMXBean.getProcessCpuLoad() × 100 is stored)
   //   "operation.invocations.pending_count" (prefix=operation.invocations, metric=pending, unit=COUNT)
   //   "blockingWorkerCount_count"    (no prefix, metric=blockingWorkerCount, unit=COUNT)
+  // key examples (with discriminator — data structure name):
+  //   "map.employees.hits_count"     (prefix=map, discriminatorValue=employees, metric=hits, unit=COUNT)
+  //   "map.orders.ownedEntryCount_count"
+  //   "cache.sessionCache.hits_count"
 }
 ```
 
 ```json
-{"epoch":1710849600000,"name":"Metric","content":{"memory.usedHeap_bytes":1073741824,"memory.maxHeap_bytes":4294967296,"gc.majorTime_ms":1200,"gc.minorTime_ms":340,"os.processCpuLoad":0.12,"os.systemCpuLoad":null,"operation.invocations.pending_count":0,"operation.thread.completedOperationCount_count":2048}}
+{"epoch":1710849600000,"name":"Metric","content":{"memory.usedHeap_bytes":1073741824,"memory.maxHeap_bytes":4294967296,"gc.majorTime_ms":1200,"gc.minorTime_ms":340,"os.processCpuLoad":16.4,"os.systemCpuLoad":null,"operation.invocations.pending_count":0,"operation.thread.completedOperationCount_count":2048}}
 ```
 
 > **STANDARD vs JSON difference:** STANDARD uses the raw `[metric=...,unit=...]`
@@ -1238,11 +1246,17 @@ key names require escaping in most query languages, and the format is not
 documented as stable API. For JSON mode a new key format was introduced:
 
 ```
-[prefix.]metric[_unit]
+[prefix.][discriminatorValue.]metric[_unit]
 ```
 
 Examples: `memory.usedHeap_bytes`, `gc.majorTime_ms`, `os.processCpuLoad`
 (no unit suffix when the probe has no unit annotation).
+
+When a metric descriptor carries a discriminator (the instance name used to
+distinguish metrics from different data-structure instances — e.g. the map name
+for `map.*` metrics), the discriminator value is inserted between prefix and
+metric name: `map.employees.hits_count`. Without this, all maps would collapse
+onto the same key and overwrite each other.
 
 This format can be used directly as a Prometheus/Grafana label pattern or as a
 LogQL field name. The old `metricString()` format is preserved for STANDARD
@@ -1399,7 +1413,7 @@ traces) the JSON output is often *smaller* than STANDARD because the indentation
 whitespace is eliminated. For `MetricsPlugin`, each JSON line is roughly:
 
 ```
-{"epoch":1710849600000,"name":"Metric","content":{"memory.usedHeap_bytes":1073741824,"memory.maxHeap_bytes":4294967296,"os.processCpuLoad":0.12,"os.systemCpuLoad":null}}
+{"epoch":1710849600000,"name":"Metric","content":{"memory.usedHeap_bytes":1073741824,"memory.maxHeap_bytes":4294967296,"os.processCpuLoad":16.4,"os.systemCpuLoad":null}}
 ```
 
 versus the STANDARD equivalent (one section per metric):

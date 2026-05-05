@@ -23,6 +23,8 @@ import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.internal.metrics.LongProbeFunction;
 import com.hazelcast.internal.metrics.MetricsRegistry;
 import com.hazelcast.internal.metrics.Probe;
+import com.hazelcast.internal.metrics.ProbeUnit;
+import com.hazelcast.internal.metrics.impl.MetricDescriptorImpl;
 import com.hazelcast.spi.impl.NodeEngineImpl;
 import com.hazelcast.test.HazelcastTestSupport;
 import com.hazelcast.test.HazelcastParallelClassRunner;
@@ -134,6 +136,51 @@ public class JsonMetricsPluginTest extends HazelcastTestSupport {
         assertFalse("Excluded metric must not appear",
                 content.has("excluded.excludedMetric_count"));
     }
+
+    // ---- buildKey unit tests -----------------------------------------------
+
+    @Test
+    public void testBuildKey_prefixAndMetricAndUnit() {
+        MetricDescriptorImpl d = descriptor().withPrefix("map").withMetric("hits").withUnit(ProbeUnit.COUNT);
+        assertEquals("map.hits_count", JsonMetricsPlugin.buildKey(d));
+    }
+
+    @Test
+    public void testBuildKey_withDiscriminatorInsertsNameBetweenPrefixAndMetric() {
+        MetricDescriptorImpl d = descriptor()
+                .withPrefix("map")
+                .withDiscriminator("name", "employees")
+                .withMetric("hits")
+                .withUnit(ProbeUnit.COUNT);
+        assertEquals("map.employees.hits_count", JsonMetricsPlugin.buildKey(d));
+    }
+
+    @Test
+    public void testBuildKey_discriminatorWithoutPrefix() {
+        MetricDescriptorImpl d = descriptor()
+                .withDiscriminator("name", "myMap")
+                .withMetric("hits")
+                .withUnit(ProbeUnit.COUNT);
+        assertEquals("myMap.hits_count", JsonMetricsPlugin.buildKey(d));
+    }
+
+    @Test
+    public void testBuildKey_noDiscriminatorNoPrefix() {
+        MetricDescriptorImpl d = descriptor().withMetric("blockingWorkerCount").withUnit(ProbeUnit.COUNT);
+        assertEquals("blockingWorkerCount_count", JsonMetricsPlugin.buildKey(d));
+    }
+
+    @Test
+    public void testBuildKey_noUnit() {
+        MetricDescriptorImpl d = descriptor().withPrefix("os").withMetric("processCpuLoad");
+        assertEquals("os.processCpuLoad", JsonMetricsPlugin.buildKey(d));
+    }
+
+    private static MetricDescriptorImpl descriptor() {
+        return new MetricDescriptorImpl(() -> null);
+    }
+
+    // ---- probe source -------------------------------------------------------
 
     private static final class ExcludedProbeSource {
         @Probe(name = "excludedMetric", excludedTargets = DIAGNOSTICS)
