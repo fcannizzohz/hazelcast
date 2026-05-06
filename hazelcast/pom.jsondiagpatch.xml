@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Standalone POM for building the JSON diagnostics patch jar.
+
+  USAGE
+  1. Package the hazelcast module first (shade + repack must have run):
+       ./mvnw package -pl hazelcast -am -DskipTests -q
+
+  2. Build the patch jar:
+       ./mvnw -f hazelcast/pom.jsondiagpatch.xml package
+
+  Output: distribution/target/hazelcast-json-patch.jar
+
+  DOCKER INJECTION
+  Copy the jar into the Hazelcast lib directory with a name that sorts
+  lexicographically before hazelcast-*.jar so the JVM loads it first
+  when the classpath wildcard is expanded:
+
+      COPY distribution/target/hazelcast-json-patch.jar /opt/hazelcast/lib/000-hazelcast-json.jar
+
+  Activate JSON diagnostics via environment variables:
+
+      ENV JAVA_OPTS="-Dhazelcast.diagnostics.enabled=true \
+                     -Dhazelcast.diagnostics.log.format=JSON \
+                     -Dhazelcast.diagnostics.metric.level=INFO"
+
+  VERSION NOTE
+  This jar patches 4 core Hazelcast classes. It must be built from the same
+  source revision as the Hazelcast jar inside the target Docker image.
+  Mixing versions will cause NoSuchMethodError or ClassFormatError at runtime.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.hazelcast</groupId>
+    <artifactId>hazelcast-json-patch</artifactId>
+    <version>5.7.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <properties>
+        <maven.compiler.release>17</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <build>
+        <!--
+          No sources — this POM only repackages classes already compiled by the
+          main hazelcast module build into hazelcast/target/classes.
+        -->
+        <finalName>hazelcast-json-patch</finalName>
+        <directory>${project.basedir}/../distribution/target</directory>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <!-- Skip compilation: this POM repackages already-compiled classes only. -->
+                    <skipMain>true</skipMain>
+                    <skip>true</skip>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.4</version>
+                <configuration>
+                    <skip>true</skip>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.2</version>
+                <configuration>
+                    <!--
+                      Reads from hazelcast/target/tmp-repack, not target/classes.
+                      The hazelcast build runs maven-shade-plugin then an antrun repack
+                      step that unpacks the shaded jar into tmp-repack. That directory
+                      contains the post-relocation class files that end up in the
+                      final hazelcast jar — and therefore match what is in the Docker image.
+                    -->
+                    <classesDirectory>${project.basedir}/target/tmp-repack</classesDirectory>
+                    <includes>
+                        <!-- All new JSON diagnostics classes and bundled resources -->
+                        <include>com/hazelcast/internal/diagnostics/json/**</include>
+
+                        <!--
+                          The 4 existing Hazelcast classes modified to enable the JSON path.
+                          Inner classes ($*) are included explicitly — the jar plugin does not
+                          apply wildcard includes recursively to nested class files.
+                        -->
+
+                        <!-- Adds the JSON enum constant -->
+                        <include>com/hazelcast/internal/diagnostics/DiagnosticsLogFormat.class</include>
+
+                        <!-- Adds setLogFormat / getLogFormat -->
+                        <include>com/hazelcast/internal/diagnostics/DiagnosticsConfig.class</include>
+                        <include>com/hazelcast/internal/diagnostics/DiagnosticsConfig$*.class</include>
+
+                        <!-- Adds registerJsonPlugin, startJsonLog, getRegisteredPlugins;
+                             branches newLog() to JsonDiagnosticsLog; guards register() -->
+                        <include>com/hazelcast/internal/diagnostics/Diagnostics.class</include>
+                        <include>com/hazelcast/internal/diagnostics/Diagnostics$*.class</include>
+
+                        <!-- Calls registerJsonPlugins() at startup -->
+                        <include>com/hazelcast/instance/impl/DefaultNodeExtension.class</include>
+                        <include>com/hazelcast/instance/impl/DefaultNodeExtension$*.class</include>
+                    </includes>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
