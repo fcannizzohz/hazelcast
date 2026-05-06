@@ -24,6 +24,9 @@ import com.hazelcast.logging.ILogger;
 import com.hazelcast.spi.properties.HazelcastProperties;
 import com.hazelcast.spi.properties.HazelcastProperty;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 import static com.hazelcast.internal.metrics.MetricTarget.DIAGNOSTICS;
 import static java.util.concurrent.TimeUnit.SECONDS;
 
@@ -74,9 +77,8 @@ public class JsonMetricsPlugin extends JsonDiagnosticsPlugin {
     @Override
     public void run(JsonEntryWriter writer) {
         writer.startEntry(System.currentTimeMillis(), ENTRY_NAME);
-        collector.writer = writer;
         metricsRegistry.collect(collector);
-        collector.writer = null;
+        collector.flushTo(writer);
         writer.endEntry();
     }
 
@@ -121,19 +123,25 @@ public class JsonMetricsPlugin extends JsonDiagnosticsPlugin {
 
     private static final class JsonMetricsCollector implements MetricsCollector {
 
-        private JsonEntryWriter writer;
+        // Accumulates key → value for one collection cycle.
+        // LinkedHashMap preserves emission order and silently deduplicates: if two
+        // metrics produce the same flat key (e.g. because discriminatorValue is null
+        // for both), the later value overwrites the earlier one so the JSON output
+        // never contains duplicate object keys.
+        // null value means the probe reported no value (written as JSON null).
+        private final Map<String, Number> metrics = new LinkedHashMap<>();
 
         @Override
         public void collectLong(MetricDescriptor descriptor, long value) {
-            if (writer != null && descriptor.isTargetIncluded(DIAGNOSTICS)) {
-                writer.writeLong(buildKey(descriptor), value);
+            if (descriptor.isTargetIncluded(DIAGNOSTICS)) {
+                metrics.put(buildKey(descriptor), value);
             }
         }
 
         @Override
         public void collectDouble(MetricDescriptor descriptor, double value) {
-            if (writer != null && descriptor.isTargetIncluded(DIAGNOSTICS)) {
-                writer.writeDouble(buildKey(descriptor), value);
+            if (descriptor.isTargetIncluded(DIAGNOSTICS)) {
+                metrics.put(buildKey(descriptor), value);
             }
         }
 
@@ -144,9 +152,23 @@ public class JsonMetricsPlugin extends JsonDiagnosticsPlugin {
 
         @Override
         public void collectNoValue(MetricDescriptor descriptor) {
-            if (writer != null && descriptor.isTargetIncluded(DIAGNOSTICS)) {
-                writer.writeNull(buildKey(descriptor));
+            if (descriptor.isTargetIncluded(DIAGNOSTICS)) {
+                metrics.put(buildKey(descriptor), null);
             }
+        }
+
+        void flushTo(JsonEntryWriter writer) {
+            for (Map.Entry<String, Number> entry : metrics.entrySet()) {
+                Number value = entry.getValue();
+                if (value == null) {
+                    writer.writeNull(entry.getKey());
+                } else if (value instanceof Long l) {
+                    writer.writeLong(entry.getKey(), l);
+                } else {
+                    writer.writeDouble(entry.getKey(), (Double) value);
+                }
+            }
+            metrics.clear();
         }
     }
 }
