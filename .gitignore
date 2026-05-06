@@ -1,4 +1,5 @@
 target/
+.flattened-pom.xml
 .clover/
 .idea/
 !.idea/icon.png
