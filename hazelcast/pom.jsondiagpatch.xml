@@ -50,7 +50,6 @@
           No sources — this POM only repackages classes already compiled by the
           main hazelcast module build into hazelcast/target/classes.
         -->
-        <finalName>hazelcast-json-patch</finalName>
         <directory>${project.basedir}/../distribution/target</directory>
         <plugins>
             <plugin>

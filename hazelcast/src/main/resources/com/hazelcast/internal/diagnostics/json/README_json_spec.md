@@ -887,12 +887,12 @@ interface HazelcastInstanceContent {
   isRunning:    boolean;
   isLite:       boolean;
   joined:       boolean;
-  nodeState:    "ACTIVE" | "PASSIVE" | "SHUTTING_DOWN" | "SHUT_DOWN" | "null";
+  nodeState:    "ACTIVE" | "PASSIVE" | "SHUTTING_DOWN" | "SHUT_DOWN" | null;
   clusterName:  string;   // human-readable cluster name from config
-  clusterId:    string;   // UUID string, or "null" when not yet assigned
+  clusterId:    string | null;   // UUID string, or null when not yet assigned
   clusterSize:  number;
   isMaster:     boolean;
-  masterAddress: string;   // address string, or "null" when unknown
+  masterAddress: string | null;   // address string, or null when unknown
   Members: {
     entries?: MemberAddressEntry[];
   };
