@@ -1537,20 +1537,20 @@
           "type": "boolean"
         },
         "nodeState": {
-          "type": "string",
+          "type": ["string", "null"],
           "enum": [
             "ACTIVE",
             "PASSIVE",
             "SHUTTING_DOWN",
             "SHUT_DOWN",
-            "null"
+            null
           ]
         },
         "clusterName": {
           "type": "string"
         },
         "clusterId": {
-          "type": "string"
+          "type": ["string", "null"]
         },
         "clusterSize": {
           "type": "integer",
@@ -1560,7 +1560,7 @@
           "type": "boolean"
         },
         "masterAddress": {
-          "type": "string"
+          "type": ["string", "null"]
         },
         "Members": {
           "$ref": "#/$defs/memberAddressSection"
